@@ -17,7 +17,7 @@ from arb.config import ALLOWED_USERS
 from arb import paper, secrets
 from arb.tg import keyboards as kb
 from arb.tg.formatting import (MIDDLES_PAGE, PAGE_SIZE, TZ, arb_text, list_text, middles_text, money, page_count,
-                                paper_report, paper_text, signed, status_text)
+                                dur, paper_report, paper_text, signed, status_text)
 from arb.arbitrage import Arb
 from arb.tg.service import ArbService, _legs_sig, arb_key
 from arb.tg.storage import Storage, UserSettings
@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 
 MAX_ARBS_SHOWN = 15
 MAX_NOTIFY_PER_SCAN = 5
-PAPER_PER_ROUND = 10  # paper tests per scan per user (each takes a few seconds; the budget decides how many go in)
+PAPER_PER_ROUND = 10  # new paper tests started per scan per user (the budget decides how many go in)
+PAPER_MAX_RUNNING = 30  # paper tests running at once per user (each waits paper.EXEC_DELAY)
 PAPER_REPORT_HOUR = 23  # the day's paper report is sent once after this hour (Belgrade time)
 BUDGET_LIMITS = {"din": (1_000, 10_000_000), "$": (5, 1_000_000)}
 
@@ -320,8 +321,8 @@ def bot_stake_for(arb: Arb, s: UserSettings) -> float | None:
         return None
     if s.bot_hours and arb.event.start > datetime.now(timezone.utc) + timedelta(hours=s.bot_hours):
         return None
-    if arb.event.start < datetime.now(timezone.utc):
-        return None  # already started (pre-match odds only)
+    if arb.event.start < datetime.now(timezone.utc) + timedelta(seconds=paper.EXEC_DELAY):
+        return None  # starts before the last leg would go in (pre-match odds only)
     stake = paper.fit_stake(arb, s.bot_stake, s.currency)
     if stake is None or arb.pct_for(stake, s.currency) < s.bot_min:
         return None
@@ -357,7 +358,8 @@ def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None
     lines += [
         "",
         "🧪 <b>Samo test</b> – ništa se ne uplaćuje. Za svaku arbitražu bot proveri kvote uživo, "
-        "„uplati“ prvu nogu, posle 2 s ponovo proveri poslednju i javi ti da li bi prošlo i kolika bi bila zarada. "
+        f"„uplati“ prvu nogu, posle {dur(paper.EXEC_DELAY)} ponovo proveri poslednju (toliko traje prebacivanje novca) "
+        "i javi ti da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno. "
         "Uveče stiže izveštaj.",
     ]
     if s.mode != "crypto":
@@ -768,6 +770,9 @@ class Notifier:
         self.paper_seen: dict[int, dict[str, tuple[float, tuple]]] = {}  # uid -> arb key -> (tested at, legs)
         self.paper_reported: dict[int, str] = {}  # uid -> date of the last evening report
         self.paper_full: set[int] = set()  # users told their /bot budget is all in play
+        # tests still waiting for their last leg: uid -> arb key -> $ reserved from the balance
+        self.paper_running: dict[int, dict[str, float]] = {}
+        self.paper_jobs: set[asyncio.Task] = set()
 
     async def __call__(self) -> None:
         await self.update_lists()
@@ -786,19 +791,29 @@ class Notifier:
             except Exception:
                 log.exception("paper round %s failed", uid)
 
+    async def _paper_free(self, uid: int, s: UserSettings) -> float:
+        """Balance free for a new test: minus what's in play and what running tests hold."""
+        led = await asyncio.to_thread(paper.ledger, uid, s.bot_bank, s.bot_since)
+        return led.free - sum(self.paper_running.get(uid, {}).values())
+
     async def _paper_user(self, uid: int, s: UserSettings) -> None:
+        """Start tests for the arbs that pass the /bot rules. Each one waits paper.EXEC_DELAY
+        for its last leg, so they run side by side; the stake is reserved right away."""
         seen = self.paper_seen.setdefault(uid, {})
+        running = self.paper_running.setdefault(uid, {})
         now = time.time()
         todo = []
         for a in self.service.arbs_for(s):
-            if bot_stake_for(a, s) is None:  # the /bot rules: kickoff within N h, min %, max stake
+            if arb_key(a) in running or bot_stake_for(a, s) is None:  # /bot rules: kickoff, min %, max stake
                 continue
             prev = seen.get(arb_key(a))
             if prev and prev[1] == _legs_sig(a) and now - prev[0] < paper.RETEST_AFTER:
                 continue  # tested already with these same odds
             todo.append(a)
         for a in todo[:PAPER_PER_ROUND]:
-            free = (await asyncio.to_thread(paper.ledger, uid, s.bot_bank, s.bot_since)).free
+            if len(running) >= PAPER_MAX_RUNNING:
+                break
+            free = await self._paper_free(uid, s)
             if free < paper.MIN_STAKE:  # the whole budget is in play: wait for matches to end
                 if uid not in self.paper_full:
                     self.paper_full.add(uid)
@@ -807,24 +822,38 @@ class Notifier:
                              "Stanje vidiš u /bot.")
                 break
             self.paper_full.discard(uid)
-            seen[arb_key(a)] = (time.time(), _legs_sig(a))
-            r = await paper.run_test(self.service, a, s, s.currency, min(s.bot_stake, free))
-            if r.status in paper.PLACED:
-                r.free, r.settles = free - r.total, paper.settles_at(r.start)
-            await asyncio.to_thread(paper.save, uid, r)
-            log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
-            if r.status in (paper.GONE, paper.NO_FIT):
-                continue  # nothing would have been bet - only counted in the report
-            try:
-                await self.bot.send_message(uid, paper_text(r, s.currency))
-            except TelegramForbiddenError:
-                s.paper = False
-                self.store.save()
-                return
+            key = arb_key(a)
+            seen[key] = (time.time(), _legs_sig(a))
+            running[key] = cap = min(s.bot_stake, free)
+            job = asyncio.create_task(self._paper_test(uid, s, a, cap))
+            self.paper_jobs.add(job)
+            job.add_done_callback(self.paper_jobs.discard)
         local = datetime.now(TZ)
         if local.hour >= PAPER_REPORT_HOUR and self.paper_reported.get(uid) != local.date().isoformat():
             self.paper_reported[uid] = local.date().isoformat()
             await self.bot.send_message(uid, paper_report_for(uid, s))
+
+    async def _paper_test(self, uid: int, s: UserSettings, a: Arb, cap: float) -> None:
+        key = arb_key(a)
+        try:
+            r = await paper.run_test(self.service, a, s, s.currency, cap)
+            await asyncio.to_thread(paper.save, uid, r)
+        except Exception:
+            log.exception("paper test %s %s failed", uid, key)
+            return
+        finally:
+            self.paper_running.get(uid, {}).pop(key, None)  # saved (or failed): the ledger has it now
+        log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
+        if r.status in (paper.GONE, paper.NO_FIT):
+            return  # nothing would have been bet - only counted in the report
+        r.free, r.settles = await self._paper_free(uid, s), paper.settles_at(r.start)
+        try:
+            await self.bot.send_message(uid, paper_text(r, s.currency))
+        except TelegramForbiddenError:
+            s.paper = False
+            self.store.save()
+        except Exception:
+            log.exception("paper message %s failed", uid)
 
     async def update_lists(self) -> None:
         for uid, ll in list(live_lists.items()):

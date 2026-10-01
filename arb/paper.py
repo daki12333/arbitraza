@@ -22,7 +22,7 @@ from arb.tg.formatting import outcome_text
 from arb.tg.service import arb_key, group_key
 
 DB_FILE = DATA_DIR / "paper.db"
-EXEC_DELAY = 2.0  # s - a real bet on the first bookie takes about this long before the next leg goes in
+EXEC_DELAY = 150.0  # s - from the first leg to the last: moving the money over (e.g. Solana) takes ~2 min
 EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills instantly, "all or nothing")
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long

@@ -54,6 +54,14 @@ def money(x: float, currency: str = "din") -> str:
     return f"{x:,.0f}".replace(",", ".")
 
 
+def dur(seconds: float) -> str:
+    """2.1 -> "2,1 s", 151 -> "2 min 31 s"."""
+    if seconds < 60:
+        return f"{seconds:.1f} s".replace(".", ",")
+    m, s = divmod(round(seconds), 60)
+    return f"{m} min {s} s" if s else f"{m} min"
+
+
 def ago(seconds: float) -> str:
     if seconds < 60:
         return f"{int(seconds)} s"
@@ -386,11 +394,11 @@ def paper_text(r, currency: str = "$") -> str:
         elif l.status == "unknown":
             line += " → nije stigla provera ❔"
         elif l.now_odd is None:
-            line += f" → posle {r.seconds:.1f} s <b>više nije u ponudi</b> ❌".replace(".", ",")
+            line += f" → posle {dur(r.seconds)} <b>više nije u ponudi</b> ❌"
         else:
             mark = {"ok": "✅", "worse": "🟡", "miss": "❌"}[l.status]
             moved = "" if abs(l.now_odd - l.odd) < 0.0005 else f" (bila {fmt_odd(l.odd)})"
-            line += f" → posle {r.seconds:.1f} s".replace(".", ",") + f" kvota {fmt_odd(l.now_odd)}{moved} {mark}"
+            line += f" → posle {dur(r.seconds)} kvota {fmt_odd(l.now_odd)}{moved} {mark}"
         lines.append(line)
     lines += ["", _PAPER_HEAD.get(r.status, r.status)]
     if r.status == "miss":
@@ -440,7 +448,7 @@ def paper_report(rows: list[dict], since_label: str, currency: str = "$") -> str
         f"🧾 <b>UKUPNO: {signed(won + lost, currency)} {currency}</b>",
     ]
     if secs:
-        lines.append(f"⏱ prosečno od prve do poslednje noge: {sum(secs) / len(secs):.1f} s".replace(".", ","))
+        lines.append(f"⏱ prosečno od prve do poslednje noge: {dur(sum(secs) / len(secs))}")
     if misses:
         lines.append("📉 gde se kvota pomerila: " + ", ".join(f"{b} {k}" for b, k in sorted(misses.items(), key=lambda x: -x[1])))
     lines += ["", "ℹ️ Test ne vidi da li bi kladionica odbila tiket ili smanjila ulog – to pokazuje tek pravo igranje."]

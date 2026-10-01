@@ -74,7 +74,7 @@ Ostalo:
   - 💵 najveći ulog po arbitraži u $; ako kladionica ili Polymarket ponuda ne prima toliko, uzima manje (najmanje 5 $)
   - 💼 početni budžet (balans) u $: deli se na više arbitraža odjednom (npr. 500 $ i max 100 $ = do 5 istovremeno). Ulog je „u igri“ dok se meč ne završi (računa se 3 h posle početka); tek tada se ulog i zarada vraćaju na balans. `/bot` pokazuje balans, koliko je u igri, zaradu koja čeka i koliko je slobodno. Kad nema slobodnog novca, test čeka. 🔄 Kreni ispočetka vraća balans na početni budžet
 
-  Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle 2 s ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
+  Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle **2,5 min** (koliko traje prebacivanje novca, npr. preko Solane) ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno, a ulog se odmah rezerviše iz balansa. Mečevi koji počinju pre druge uplate se preskaču. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.
 - `📊 Status`: da li sve kladionice rade i koliko je mečeva upareno
 
