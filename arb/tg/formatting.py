@@ -376,7 +376,9 @@ _PAPER_HEAD = {
 def paper_text(r, currency: str = "$") -> str:
     """One paper bet: what would have been bet, and whether the last leg still held."""
     lines = [f"🧪 <b>Test na papiru</b> · {escape(r.name)}",
-             f"📊 {escape(r.market)}  ·  ukupno {money(r.total, currency)} {currency}", ""]
+             f"📊 {escape(r.market)}  ·  ukupno {money(r.total, currency)} {currency}"
+             + (f" (max {money(r.cap, currency)} – više ne prima)" if r.cap and r.total < r.cap * (1 - 0.03) else ""),
+             ""]
     for l in r.legs:
         line = f"{l.order}. {l.bookie}: <b>{l.label}</b> @ {fmt_odd(l.odd)} × {money(l.stake, currency)} {currency}"
         if l.status == "placed":
@@ -409,7 +411,7 @@ def paper_report(rows: list[dict], since_label: str, currency: str = "$") -> str
     """Summary of the stored paper tests (arb.paper.load)."""
     if not rows:
         return (f"📊 <b>Test na papiru – {since_label}</b>\n\nJoš nema testova. Bot testira arbitraže koje prolaze "
-                "tvoja pravila iz 🔔 Obaveštenja (najmanji % i rok početka meča).")
+                "tvoja pravila iz /bot (rok početka meča, najmanji % i najveći ulog).")
     by: dict[str, list[dict]] = {}
     for r in rows:
         by.setdefault(r["status"], []).append(r)

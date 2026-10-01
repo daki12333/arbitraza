@@ -25,6 +25,7 @@ EXEC_DELAY = 2.0  # s - a real bet on the first bookie takes about this long bef
 EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills instantly, "all or nothing")
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
+MIN_STAKE = 5.0  # $ - below this a test isn't worth it
 
 # result statuses
 OK = "ok"  # every leg at the planned odds (or better)
@@ -64,6 +65,7 @@ class PaperResult:
     seconds: float = 0.0  # from betting the first leg to the last leg's check (what a real bet would wait)
     legs: list[LegTest] = field(default_factory=list)
     hedge: str = ""  # on a miss: where it would be covered
+    cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
     at: float = field(default_factory=time.time)
 
 
@@ -88,6 +90,17 @@ def _leg_now(leg: Leg, ev: Event | None, stake: float) -> tuple[float | None, fl
     return pay / stake, pay
 
 
+def fit_stake(arb: Arb, max_stake: float, currency: str = "$") -> float | None:
+    """The biggest total up to `max_stake` that this arb takes: the full amount if every leg
+    fits, otherwise less (a bookie limit / thin Polymarket book). None = not even MIN_STAKE."""
+    stake = max_stake
+    while stake >= MIN_STAKE - 1e-9:
+        if arb.plan(stake, currency):
+            return stake
+        stake = round(stake * 0.75 * 2) / 2  # 100 -> 75 -> 56 -> 42 ... on half-dollars
+    return None
+
+
 async def refetch(service, arb: Arb, bookies: set[str]) -> dict[str, Event | None]:
     """These bookies' odds for the arb's match right now, turned like the group.
     A bookie missing from the result didn't answer in time; None = match no longer offered."""
@@ -105,20 +118,23 @@ async def refetch(service, arb: Arb, bookies: set[str]) -> dict[str, Event | Non
     return out
 
 
-async def run_test(service, arb: Arb, s, currency: str) -> PaperResult:
-    """One paper bet on this arb for user settings `s`."""
+async def run_test(service, arb: Arb, s, currency: str, budget: float | None = None) -> PaperResult:
+    """One paper bet on this arb for user settings `s`, with total stake `budget`
+    (default: the user's budget)."""
+    budget = s.budget if budget is None else budget
     t0 = time.perf_counter()
     ev = arb.event
     res = PaperResult(key=arb_key(arb), name=f"{ev.home} – {ev.away}",
                       market=market_label(arb.market, ev.sport, ev.home, ev.away),
-                      sport=ev.sport, start=ev.start.isoformat(), status=GONE)
+                      sport=ev.sport, start=ev.start.isoformat(), status=GONE, cap=budget)
     # 1) odds right now on every leg (same check as clicking an arb)
     fresh = await service.verify([arb], s)
     if not fresh:
         res.seconds = time.perf_counter() - t0
         return res
     a = fresh[0]
-    rows = a.plan(s.budget, currency)
+    stake = fit_stake(a, budget, currency)  # the fresh odds may take less than the scan's
+    rows = a.plan(stake, currency) if stake else None
     if not rows:
         res.status, res.seconds = NO_FIT, time.perf_counter() - t0
         return res

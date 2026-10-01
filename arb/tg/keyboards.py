@@ -86,13 +86,34 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
         mark = "✅ " if h == s.notify_hours else ""
         b.button(text=f"{mark}{'⏰ Bilo kad' if h == 0 else f'{h}h'}", callback_data=f"nt:h:{h}")
     b.button(text="✏️ Upiši sate", callback_data="nt:hcustom")
-    rows = [1, 4, 3, 1, len(NOTIFY_HOURS), 1]
-    if s.mode == "crypto":  # paper trading is for the crypto books only
-        b.button(text="🧪 Test na papiru: ✅ uključen" if s.paper else "🧪 Test na papiru: ⬜ isključen",
-                 callback_data="nt:paper")
-        b.button(text="📊 Izveštaj testa", callback_data="nt:prep")
-        rows += [1, 1]
-    b.adjust(*rows)
+    b.adjust(1, 4, 3, 1, len(NOTIFY_HOURS), 1)
+    return b.as_markup()
+
+
+# /bot: the rules of the paper test (arb.paper)
+BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
+BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
+BOT_STAKES = [10, 25, 50, 100, 250]
+
+
+def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🧪 Test: ✅ uključen (klik = isključi)" if s.paper else "🧪 Test: ⬜ isključen (klik = uključi)",
+             callback_data="bt:toggle")
+    for h in BOT_HOURS:
+        mark = "✅ " if h == s.bot_hours else ""
+        b.button(text=f"{mark}{'bilo kad' if h == 0 else f'⏰ {h}h'}", callback_data=f"bt:h:{h}")
+    b.button(text="✏️ Upiši sate", callback_data="bt:hcustom")
+    for p in BOT_MINS:
+        mark = "✅ " if p == s.bot_min else ""
+        b.button(text=f"{mark}📈 {p:g}%", callback_data=f"bt:min:{p}")
+    b.button(text="✏️ Upiši %", callback_data="bt:mcustom")
+    for a in BOT_STAKES:
+        mark = "✅ " if a == s.bot_stake else ""
+        b.button(text=f"{mark}💵 {a} $", callback_data=f"bt:st:{a}")
+    b.button(text="✏️ Upiši max ulog", callback_data="bt:scustom")
+    b.button(text="📊 Izveštaj (danas)", callback_data="bt:report")
+    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 1)
     return b.as_markup()
 
 

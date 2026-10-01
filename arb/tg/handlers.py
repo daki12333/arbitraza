@@ -303,9 +303,7 @@ def notify_text(s: UserSettings) -> str:
         "📋 Lista arbitraža prikazuje sve koje prolaze za tvoj ulog, bez obzira na ovo."
     )
     if s.mode == "crypto":
-        text += ("\n\n🧪 <b>Test na papiru</b>: " + ("uključen" if s.paper else "isključen") +
-                 " – bot „igra“ arbitraže po ovim istim pravilima, ali ništa ne uplaćuje, i javi ti da li bi "
-                 "prošle (kvote proverene uživo, druga noga posle 2 s). Uveče stiže izveštaj.")
+        text += "\n\n🧪 Test na papiru se podešava posebno: /bot"
     return text
 
 
@@ -313,6 +311,44 @@ def paper_report_for(uid: int, s: UserSettings) -> str:
     """Today's paper tests (since midnight, Belgrade time)."""
     midnight = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     return paper_report(paper.load(uid, midnight.timestamp()), "danas (od 00:00)", s.currency)
+
+
+def bot_stake_for(arb: Arb, s: UserSettings) -> float | None:
+    """The total the /bot test would put into this arb: up to bot_stake, less if the
+    bookies take less. None = the arb doesn't pass the /bot rules."""
+    if arb.suspicious:
+        return None
+    if s.bot_hours and arb.event.start > datetime.now(timezone.utc) + timedelta(hours=s.bot_hours):
+        return None
+    if arb.event.start < datetime.now(timezone.utc):
+        return None  # already started (pre-match odds only)
+    stake = paper.fit_stake(arb, s.bot_stake, s.currency)
+    if stake is None or arb.pct_for(stake, s.currency) < s.bot_min:
+        return None
+    return stake
+
+
+def bot_text(s: UserSettings, service: ArbService | None = None) -> str:
+    when = f"u narednih <b>{s.bot_hours} h</b>" if s.bot_hours else "<b>bilo kad</b>"
+    lines = [
+        "🤖 <b>Bot – test na papiru</b>: " + ("✅ <b>uključen</b>" if s.paper else "⬜ <b>isključen</b>"), "",
+        "Igra sve arbitraže koje:",
+        f"⏰ počinju {when}",
+        f"📈 imaju profit <b>{s.bot_min:g}%</b> ili više",
+        f"💵 sa ulogom do <b>{money(s.bot_stake, '$')} $</b> po arbitraži (manje ako kladionica ili Polymarket ne prima toliko)",
+    ]
+    if service is not None and s.mode == "crypto" and service.covers(s):
+        n = sum(1 for a in service.arbs_for(s) if bot_stake_for(a, s) is not None)
+        lines.append(f"\n🔎 Trenutno ovo prolazi: <b>{n}</b> arbitraža")
+    lines += [
+        "",
+        "🧪 <b>Samo test</b> – ništa se ne uplaćuje. Za svaku arbitražu bot proveri kvote uživo, "
+        "„uplati“ prvu nogu, posle 2 s ponovo proveri poslednju i javi ti da li bi prošlo i kolika bi bila zarada. "
+        "Uveče stiže izveštaj.",
+    ]
+    if s.mode != "crypto":
+        lines.append("\n⚠️ Test radi samo sa 🪙 kripto kladionicama – prebaci u 🏦 Kladionice → 🪙 Prebaci na kripto.")
+    return "\n".join(lines)
 
 
 def notify_wanted(arb: Arb, s: UserSettings) -> bool:
@@ -326,6 +362,13 @@ def notify_wanted(arb: Arb, s: UserSettings) -> bool:
 async def show_notify(m: Message, store: Storage) -> None:
     s = store.get(m.from_user.id)
     await m.answer(notify_text(s), reply_markup=kb.notify_kb(s))
+
+
+@router.message(Command("bot"))
+async def show_bot(m: Message, service: ArbService, store: Storage) -> None:
+    awaiting.pop(m.from_user.id, None)
+    s = store.get(m.from_user.id)
+    await m.answer(bot_text(s, service), reply_markup=kb.bot_kb(s))
 
 
 PERCENT_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*%?\s*$")
@@ -391,6 +434,37 @@ async def typed_notify_hours(m: Message, store: Storage) -> None:
     s.notify_hours, s.notify = hours, True
     store.save()
     await m.answer(notify_text(s), reply_markup=kb.notify_kb(s))
+
+
+@router.message(F.text, lambda m: awaiting.get(m.from_user.id) in ("bot_h", "bot_min", "bot_stake"))
+async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
+    what = awaiting[m.from_user.id]
+    s = store.get(m.from_user.id)
+    text = (m.text or "").strip()
+    if what == "bot_h":
+        match = re.match(r"^(\d+)\s*(h|sat[ai]?)?$", text, re.I)
+        value = int(match.group(1)) if match else -1
+        if not 0 <= value <= 24 * 14:
+            await m.answer("Upiši broj sati, npr. <code>3</code> (0 = bilo kad)")
+            return
+        s.bot_hours = value
+    elif what == "bot_min":
+        match = PERCENT_RE.match(text)
+        value = float(match.group(1).replace(",", ".")) if match else -1
+        if not 0 <= value <= 50:
+            await m.answer("Upiši procenat između 0 i 50, npr. <code>1.5</code>")
+            return
+        s.bot_min = value
+    else:
+        match = re.match(r"^(\d+(?:[.,]\d+)?)\s*\$?$", text)
+        value = round(float(match.group(1).replace(",", ".")) * 2) / 2 if match else -1
+        if not paper.MIN_STAKE <= value <= 100_000:
+            await m.answer(f"Upiši max ulog u $ (od {paper.MIN_STAKE:g}), npr. <code>100</code>")
+            return
+        s.bot_stake = number(str(value))
+    awaiting.pop(m.from_user.id, None)
+    store.save()
+    await m.answer(bot_text(s, service), reply_markup=kb.bot_kb(s))
 
 
 @router.message(F.text.regexp(AMOUNT_RE))
@@ -563,17 +637,6 @@ async def cb_notify(c: CallbackQuery, store: Storage) -> None:
         await c.message.answer("✏️ Upiši minimalni profit u % za obaveštenja (npr. <code>1.5</code>):")
         await c.answer()
         return
-    if parts[1] == "prep":
-        await c.answer()
-        await c.message.answer(paper_report_for(c.from_user.id, s))
-        return
-    if parts[1] == "paper":
-        s.paper = not s.paper
-        store.save()
-        await safe_edit(c, notify_text(s), kb.notify_kb(s))
-        await c.answer("🧪 Test uključen – prve rezultate dobijaš posle sledećeg skeniranja" if s.paper
-                       else "Test isključen")
-        return
     if parts[1] == "hcustom":
         awaiting[c.from_user.id] = "notify_h"
         await c.message.answer("✏️ Upiši u koliko narednih sati utakmica treba da počinje (npr. <code>24</code>, 0 = bilo kad):")
@@ -588,6 +651,40 @@ async def cb_notify(c: CallbackQuery, store: Storage) -> None:
     store.save()
     await safe_edit(c, notify_text(s), kb.notify_kb(s))
     await c.answer("Sačuvano")
+
+
+@router.callback_query(F.data.startswith("bt:"))
+async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
+    s = store.get(c.from_user.id)
+    parts = c.data.split(":")
+    ask = {"hcustom": ("bot_h", "✏️ Upiši u koliko narednih sati meč treba da počinje (npr. <code>3</code>, 0 = bilo kad):"),
+           "mcustom": ("bot_min", "✏️ Upiši najmanji profit u % (npr. <code>0.8</code>):"),
+           "scustom": ("bot_stake", "✏️ Upiši najveći ulog po arbitraži u $ (npr. <code>150</code>):")}
+    if parts[1] in ask:
+        awaiting[c.from_user.id], prompt = ask[parts[1]]
+        await c.message.answer(prompt)
+        await c.answer()
+        return
+    if parts[1] == "report":
+        await c.answer()
+        await c.message.answer(paper_report_for(c.from_user.id, s))
+        return
+    note = "Sačuvano"
+    if parts[1] == "toggle":
+        s.paper = not s.paper
+        note = ("🧪 Test uključen – prve rezultate dobijaš posle sledećeg skeniranja" if s.paper
+                else "Test isključen")
+        if s.paper and s.mode != "crypto":
+            note = "🧪 Test uključen, ali radi tek kad prebaciš na 🪙 kripto kladionice"
+    elif parts[1] == "h":
+        s.bot_hours = int(parts[2])
+    elif parts[1] == "min":
+        s.bot_min = float(parts[2])
+    elif parts[1] == "st":
+        s.bot_stake = number(parts[2])
+    store.save()
+    await safe_edit(c, bot_text(s, service), kb.bot_kb(s))
+    await c.answer(note, show_alert=parts[1] == "toggle" and s.paper and s.mode != "crypto")
 
 
 @router.callback_query(F.data.startswith("set:"))
@@ -670,7 +767,7 @@ class Notifier:
         now = time.time()
         todo = []
         for a in self.service.arbs_for(s):
-            if a.suspicious or not notify_wanted(a, s):
+            if bot_stake_for(a, s) is None:  # the /bot rules: kickoff within N h, min %, max stake
                 continue
             prev = seen.get(arb_key(a))
             if prev and prev[1] == _legs_sig(a) and now - prev[0] < paper.RETEST_AFTER:
@@ -678,7 +775,7 @@ class Notifier:
             todo.append(a)
         for a in todo[:PAPER_PER_ROUND]:
             seen[arb_key(a)] = (time.time(), _legs_sig(a))
-            r = await paper.run_test(self.service, a, s, s.currency)
+            r = await paper.run_test(self.service, a, s, s.currency, s.bot_stake)
             await asyncio.to_thread(paper.save, uid, r)
             log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
             if r.status in (paper.GONE, paper.NO_FIT):

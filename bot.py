@@ -37,6 +37,7 @@ async def main() -> None:
     dp.include_routers(router, denied)
     await bot.set_my_commands([
         BotCommand(command="arbitraze", description="Lista svih arbitraža (osvežava se sama)"),
+        BotCommand(command="bot", description="Bot: test na papiru (rok, min %, max ulog)"),
         BotCommand(command="start", description="Glavni meni"),
     ])
 

@@ -68,6 +68,12 @@ Ostalo:
 - `🏦 Kladionice`: koje kladionice pratiš (uključi samo one gde imaš nalog); dugme `🪙 Prebaci na kripto` prebacuje na kripto kladionice (Stake, 1xBit, BC.Game, BetFury, Rainbet, Betpanda, Betplay, Golden Panda, Wild.io, Sportsbet.io, CasinOK, Thrill, Cloudbet, Dexsport, Duelbits, Shuffle, Vave, Flush, Polymarket, SX Bet); ulog u $ ide i na pola dolara (npr. 10.5) sa ulogom u $, i nazad
 - `📋 Lista arbitraža` ili `/arbitraze`: **sve** arbitraže u jednoj poruci, po 10 na strani (◀️ ▶️). Filter **Sve / 24h / 6h / 3h** (samo mečevi koji počinju u tom roku) i sortiranje **po profitu ili po vremenu**; izbor se pamti. Poruka se sama osvežava posle svakog scana (12 h ili dok ne klikneš ⏸). Broj otvara detalje sa ulozima i linkovima.
 - `🔔 Obaveštenja`: uključi ili isključi i postavi minimalni % (npr. 1.5%). Posebnom porukom stižu samo arbitraže iznad tog procenta, a lista i dalje prikazuje sve.
+- `/bot`: 🧪 **test na papiru** (samo kripto), sa svojim pravilima, odvojenim od obaveštenja:
+  - ⏰ meč počinje u narednih N sati (1 / 3 / 6 / 12 / 24 h, bilo kad ili upišeš svoje)
+  - 📈 najmanji profit u %
+  - 💵 najveći ulog po arbitraži u $; ako kladionica ili Polymarket ponuda ne prima toliko, uzima manje (najmanje 5 $)
+
+  Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle 2 s ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.
 - `📊 Status`: da li sve kladionice rade i koliko je mečeva upareno
 
