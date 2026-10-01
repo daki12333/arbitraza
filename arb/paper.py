@@ -12,6 +12,7 @@ import json
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 from arb.arbitrage import Arb, Leg
 from arb.config import DATA_DIR
@@ -26,6 +27,8 @@ EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills 
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
 MIN_STAKE = 5.0  # $ - below this a test isn't worth it
+SETTLE_HOURS = 3  # a bet's money is back in the budget this long after kickoff (the match is over)
+PLACED = ("ok", "ok_less", "miss", "unknown")  # statuses where money would really have been bet
 
 # result statuses
 OK = "ok"  # every leg at the planned odds (or better)
@@ -66,6 +69,7 @@ class PaperResult:
     legs: list[LegTest] = field(default_factory=list)
     hedge: str = ""  # on a miss: where it would be covered
     cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
+    free: float | None = None  # /bot budget left free after this bet (None = not tracked)
     at: float = field(default_factory=time.time)
 
 
@@ -190,6 +194,7 @@ async def run_test(service, arb: Arb, s, currency: str, budget: float | None = N
 # ---- storage ---------------------------------------------------------------
 
 def _db() -> sqlite3.Connection:
+    DATA_DIR.mkdir(exist_ok=True)
     con = sqlite3.connect(DB_FILE)
     con.execute("""CREATE TABLE IF NOT EXISTS tests (
         at REAL, uid INTEGER, key TEXT, name TEXT, market TEXT, status TEXT,
@@ -203,6 +208,22 @@ def save(uid: int, r: PaperResult) -> None:
                     (r.at, uid, r.key, r.name, r.market, r.status, r.total, r.profit, r.planned_profit,
                      r.seconds, json.dumps({"legs": [asdict(l) for l in r.legs], "hedge": r.hedge,
                                             "start": r.start, "sport": r.sport})))
+
+
+def in_play(uid: int, now: float | None = None) -> float:
+    """$ of this user's tested bets whose match isn't over yet (still tied up in the budget)."""
+    now = time.time() if now is None else now
+    total = 0.0
+    for r in load(uid, now - 14 * 86400):  # bets on matches up to two weeks ahead
+        if r["status"] not in PLACED:
+            continue
+        try:
+            end = datetime.fromisoformat(r["detail"]["start"]).timestamp() + SETTLE_HOURS * 3600
+        except (KeyError, ValueError):
+            continue
+        if end > now:
+            total += r["total"]
+    return total
 
 
 def load(uid: int, since: float) -> list[dict]:

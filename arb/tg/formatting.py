@@ -393,6 +393,8 @@ def paper_text(r, currency: str = "$") -> str:
             line += f" → posle {r.seconds:.1f} s".replace(".", ",") + f" kvota {fmt_odd(l.now_odd)}{moved} {mark}"
         lines.append(line)
     lines += ["", _PAPER_HEAD.get(r.status, r.status)]
+    if r.free is not None:
+        lines.append(f"💼 slobodno u budžetu posle ove: {money(max(r.free, 0), currency)} {currency}")
     if r.status == "miss":
         if r.hedge:
             lines.append(f"🛟 pokrilo bi se na {escape(r.hedge)} → rezultat <b>{signed(r.profit, currency)}</b> {currency}")

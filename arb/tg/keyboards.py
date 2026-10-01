@@ -94,6 +94,7 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
 BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
 BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
 BOT_STAKES = [10, 25, 50, 100, 250]
+BOT_BANKS = [100, 250, 500, 1_000, 2_500]
 
 
 def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
@@ -112,8 +113,12 @@ def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
         mark = "✅ " if a == s.bot_stake else ""
         b.button(text=f"{mark}💵 {a} $", callback_data=f"bt:st:{a}")
     b.button(text="✏️ Upiši max ulog", callback_data="bt:scustom")
+    for a in BOT_BANKS:
+        mark = "✅ " if a == s.bot_bank else ""
+        b.button(text=f"{mark}💼 {money(a, '$')} $", callback_data=f"bt:bank:{a}")
+    b.button(text="✏️ Upiši ukupan budžet", callback_data="bt:bcustom")
     b.button(text="📊 Izveštaj (danas)", callback_data="bt:report")
-    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 1)
+    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 1)
     return b.as_markup()
 
 

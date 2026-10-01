@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 MAX_ARBS_SHOWN = 15
 MAX_NOTIFY_PER_SCAN = 5
-PAPER_PER_ROUND = 3  # paper tests per scan per user (each takes a few seconds)
+PAPER_PER_ROUND = 10  # paper tests per scan per user (each takes a few seconds; the budget decides how many go in)
 PAPER_REPORT_HOUR = 23  # the day's paper report is sent once after this hour (Belgrade time)
 BUDGET_LIMITS = {"din": (1_000, 10_000_000), "$": (5, 1_000_000)}
 
@@ -328,7 +328,7 @@ def bot_stake_for(arb: Arb, s: UserSettings) -> float | None:
     return stake
 
 
-def bot_text(s: UserSettings, service: ArbService | None = None) -> str:
+def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None = None) -> str:
     when = f"u narednih <b>{s.bot_hours} h</b>" if s.bot_hours else "<b>bilo kad</b>"
     lines = [
         "🤖 <b>Bot – test na papiru</b>: " + ("✅ <b>uključen</b>" if s.paper else "⬜ <b>isključen</b>"), "",
@@ -336,7 +336,13 @@ def bot_text(s: UserSettings, service: ArbService | None = None) -> str:
         f"⏰ počinju {when}",
         f"📈 imaju profit <b>{s.bot_min:g}%</b> ili više",
         f"💵 sa ulogom do <b>{money(s.bot_stake, '$')} $</b> po arbitraži (manje ako kladionica ili Polymarket ne prima toliko)",
+        "",
+        f"💼 Ukupan budžet: <b>{money(s.bot_bank, '$')} $</b>",
     ]
+    if uid is not None:
+        used = paper.in_play(uid)
+        lines.append(f"   u igri: {money(used, '$')} $  ·  slobodno: <b>{money(max(s.bot_bank - used, 0), '$')} $</b>")
+    lines.append("   (uplata je „u igri“ dok se meč ne završi; kad nema slobodnog novca, bot čeka)")
     if service is not None and s.mode == "crypto" and service.covers(s):
         n = sum(1 for a in service.arbs_for(s) if bot_stake_for(a, s) is not None)
         lines.append(f"\n🔎 Trenutno ovo prolazi: <b>{n}</b> arbitraža")
@@ -368,7 +374,7 @@ async def show_notify(m: Message, store: Storage) -> None:
 async def show_bot(m: Message, service: ArbService, store: Storage) -> None:
     awaiting.pop(m.from_user.id, None)
     s = store.get(m.from_user.id)
-    await m.answer(bot_text(s, service), reply_markup=kb.bot_kb(s))
+    await m.answer(bot_text(s, service, m.from_user.id), reply_markup=kb.bot_kb(s))
 
 
 PERCENT_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*%?\s*$")
@@ -436,7 +442,7 @@ async def typed_notify_hours(m: Message, store: Storage) -> None:
     await m.answer(notify_text(s), reply_markup=kb.notify_kb(s))
 
 
-@router.message(F.text, lambda m: awaiting.get(m.from_user.id) in ("bot_h", "bot_min", "bot_stake"))
+@router.message(F.text, lambda m: awaiting.get(m.from_user.id) in ("bot_h", "bot_min", "bot_stake", "bot_bank"))
 async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
     what = awaiting[m.from_user.id]
     s = store.get(m.from_user.id)
@@ -458,13 +464,14 @@ async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
     else:
         match = re.match(r"^(\d+(?:[.,]\d+)?)\s*\$?$", text)
         value = round(float(match.group(1).replace(",", ".")) * 2) / 2 if match else -1
-        if not paper.MIN_STAKE <= value <= 100_000:
-            await m.answer(f"Upiši max ulog u $ (od {paper.MIN_STAKE:g}), npr. <code>100</code>")
+        if not paper.MIN_STAKE <= value <= 1_000_000:
+            name = "max ulog" if what == "bot_stake" else "ukupan budžet"
+            await m.answer(f"Upiši {name} u $ (od {paper.MIN_STAKE:g}), npr. <code>{100 if what == 'bot_stake' else 500}</code>")
             return
-        s.bot_stake = number(str(value))
+        setattr(s, what, number(str(value)))
     awaiting.pop(m.from_user.id, None)
     store.save()
-    await m.answer(bot_text(s, service), reply_markup=kb.bot_kb(s))
+    await m.answer(bot_text(s, service, m.from_user.id), reply_markup=kb.bot_kb(s))
 
 
 @router.message(F.text.regexp(AMOUNT_RE))
@@ -659,7 +666,8 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
     parts = c.data.split(":")
     ask = {"hcustom": ("bot_h", "✏️ Upiši u koliko narednih sati meč treba da počinje (npr. <code>3</code>, 0 = bilo kad):"),
            "mcustom": ("bot_min", "✏️ Upiši najmanji profit u % (npr. <code>0.8</code>):"),
-           "scustom": ("bot_stake", "✏️ Upiši najveći ulog po arbitraži u $ (npr. <code>150</code>):")}
+           "scustom": ("bot_stake", "✏️ Upiši najveći ulog po arbitraži u $ (npr. <code>150</code>):"),
+           "bcustom": ("bot_bank", "✏️ Upiši ukupan budžet za bota u $ (npr. <code>800</code>):")}
     if parts[1] in ask:
         awaiting[c.from_user.id], prompt = ask[parts[1]]
         await c.message.answer(prompt)
@@ -682,8 +690,10 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
         s.bot_min = float(parts[2])
     elif parts[1] == "st":
         s.bot_stake = number(parts[2])
+    elif parts[1] == "bank":
+        s.bot_bank = number(parts[2])
     store.save()
-    await safe_edit(c, bot_text(s, service), kb.bot_kb(s))
+    await safe_edit(c, bot_text(s, service, c.from_user.id), kb.bot_kb(s))
     await c.answer(note, show_alert=parts[1] == "toggle" and s.paper and s.mode != "crypto")
 
 
@@ -744,6 +754,7 @@ class Notifier:
         self.paper_task: asyncio.Task | None = None
         self.paper_seen: dict[int, dict[str, tuple[float, tuple]]] = {}  # uid -> arb key -> (tested at, legs)
         self.paper_reported: dict[int, str] = {}  # uid -> date of the last evening report
+        self.paper_full: set[int] = set()  # users told their /bot budget is all in play
 
     async def __call__(self) -> None:
         await self.update_lists()
@@ -774,8 +785,19 @@ class Notifier:
                 continue  # tested already with these same odds
             todo.append(a)
         for a in todo[:PAPER_PER_ROUND]:
+            free = s.bot_bank - await asyncio.to_thread(paper.in_play, uid)
+            if free < paper.MIN_STAKE:  # the whole budget is in play: wait for matches to end
+                if uid not in self.paper_full:
+                    self.paper_full.add(uid)
+                    await self.bot.send_message(
+                        uid, f"💼 Ceo budžet ({money(s.bot_bank, '$')} $) je u igri – test čeka da se mečevi završe. "
+                             "Budžet menjaš u /bot.")
+                break
+            self.paper_full.discard(uid)
             seen[arb_key(a)] = (time.time(), _legs_sig(a))
-            r = await paper.run_test(self.service, a, s, s.currency, s.bot_stake)
+            r = await paper.run_test(self.service, a, s, s.currency, min(s.bot_stake, free))
+            if r.status in paper.PLACED:
+                r.free = free - r.total
             await asyncio.to_thread(paper.save, uid, r)
             log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
             if r.status in (paper.GONE, paper.NO_FIT):

@@ -72,6 +72,7 @@ Ostalo:
   - ⏰ meč počinje u narednih N sati (1 / 3 / 6 / 12 / 24 h, bilo kad ili upišeš svoje)
   - 📈 najmanji profit u %
   - 💵 najveći ulog po arbitraži u $; ako kladionica ili Polymarket ponuda ne prima toliko, uzima manje (najmanje 5 $)
+  - 💼 ukupan budžet u $: deli se na više arbitraža odjednom (npr. 500 $ i max 100 $ = do 5 istovremeno). Uplata je „u igri“ dok se meč ne završi (3 h posle početka), pa se vraća u slobodan deo; kad nema slobodnog novca, test čeka
 
   Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle 2 s ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.

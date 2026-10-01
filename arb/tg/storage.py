@@ -30,6 +30,7 @@ class UserSettings:
     bot_hours: int = 3  # only matches starting within this many hours (0 = any time)
     bot_min: float = 1.0  # only arbs with at least this profit % (for the stake actually played)
     bot_stake: float = 100  # most one arb gets in total ($); less when the bookies take less
+    bot_bank: float = 500  # the whole budget ($): money of tested bets stays "in play" until their match ends
     list_hours: int = 0  # list only matches starting within this many hours (0 = all)
     list_sort: str = "pct"  # "pct" = best profit first, "time" = soonest first
     # store the switched-OFF ones, so newly added bookies are on by default
