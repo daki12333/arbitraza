@@ -116,9 +116,10 @@ def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
     for a in BOT_BANKS:
         mark = "✅ " if a == s.bot_bank else ""
         b.button(text=f"{mark}💼 {money(a, '$')} $", callback_data=f"bt:bank:{a}")
-    b.button(text="✏️ Upiši ukupan budžet", callback_data="bt:bcustom")
+    b.button(text="✏️ Upiši početni budžet", callback_data="bt:bcustom")
     b.button(text="📊 Izveštaj (danas)", callback_data="bt:report")
-    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 1)
+    b.button(text="🔄 Kreni ispočetka", callback_data="bt:reset")
+    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 2)
     return b.as_markup()
 
 

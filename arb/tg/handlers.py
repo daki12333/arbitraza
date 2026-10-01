@@ -17,7 +17,7 @@ from arb.config import ALLOWED_USERS
 from arb import paper, secrets
 from arb.tg import keyboards as kb
 from arb.tg.formatting import (MIDDLES_PAGE, PAGE_SIZE, TZ, arb_text, list_text, middles_text, money, page_count,
-                                paper_report, paper_text, status_text)
+                                paper_report, paper_text, signed, status_text)
 from arb.arbitrage import Arb
 from arb.tg.service import ArbService, _legs_sig, arb_key
 from arb.tg.storage import Storage, UserSettings
@@ -336,13 +336,21 @@ def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None
         f"⏰ počinju {when}",
         f"📈 imaju profit <b>{s.bot_min:g}%</b> ili više",
         f"💵 sa ulogom do <b>{money(s.bot_stake, '$')} $</b> po arbitraži (manje ako kladionica ili Polymarket ne prima toliko)",
-        "",
-        f"💼 Ukupan budžet: <b>{money(s.bot_bank, '$')} $</b>",
     ]
     if uid is not None:
-        used = paper.in_play(uid)
-        lines.append(f"   u igri: {money(used, '$')} $  ·  slobodno: <b>{money(max(s.bot_bank - used, 0), '$')} $</b>")
-    lines.append("   (uplata je „u igri“ dok se meč ne završi; kad nema slobodnog novca, bot čeka)")
+        led = paper.ledger(uid, s.bot_bank, s.bot_since)
+        lines += [
+            "",
+            f"💼 <b>Balans: {money(led.balance, '$')} $</b>",
+            f"   početno {money(s.bot_bank, '$')} $ · zarada od završenih mečeva {signed(led.settled_profit, '$')} $"
+            f" ({led.settled_n})",
+            f"⏳ U igri: {money(led.in_play, '$')} $ (mečeva: {led.open_n}) · čeka zarada {signed(led.pending_profit, '$')} $"
+            + (f" (prva oko {datetime.fromtimestamp(led.next_settle, TZ):%H:%M})" if led.next_settle else ""),
+            f"✅ Slobodno za nove: <b>{money(max(led.free, 0), '$')} $</b>",
+            "",
+            "Zarada ulazi u balans tek kad se meč završi (računa se 3 h posle početka). "
+            "Kad nema slobodnog novca, bot čeka.",
+        ]
     if service is not None and s.mode == "crypto" and service.covers(s):
         n = sum(1 for a in service.arbs_for(s) if bot_stake_for(a, s) is not None)
         lines.append(f"\n🔎 Trenutno ovo prolazi: <b>{n}</b> arbitraža")
@@ -465,7 +473,7 @@ async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
         match = re.match(r"^(\d+(?:[.,]\d+)?)\s*\$?$", text)
         value = round(float(match.group(1).replace(",", ".")) * 2) / 2 if match else -1
         if not paper.MIN_STAKE <= value <= 1_000_000:
-            name = "max ulog" if what == "bot_stake" else "ukupan budžet"
+            name = "max ulog" if what == "bot_stake" else "početni budžet"
             await m.answer(f"Upiši {name} u $ (od {paper.MIN_STAKE:g}), npr. <code>{100 if what == 'bot_stake' else 500}</code>")
             return
         setattr(s, what, number(str(value)))
@@ -667,7 +675,7 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
     ask = {"hcustom": ("bot_h", "✏️ Upiši u koliko narednih sati meč treba da počinje (npr. <code>3</code>, 0 = bilo kad):"),
            "mcustom": ("bot_min", "✏️ Upiši najmanji profit u % (npr. <code>0.8</code>):"),
            "scustom": ("bot_stake", "✏️ Upiši najveći ulog po arbitraži u $ (npr. <code>150</code>):"),
-           "bcustom": ("bot_bank", "✏️ Upiši ukupan budžet za bota u $ (npr. <code>800</code>):")}
+           "bcustom": ("bot_bank", "✏️ Upiši početni budžet (balans) za bota u $ (npr. <code>800</code>):")}
     if parts[1] in ask:
         awaiting[c.from_user.id], prompt = ask[parts[1]]
         await c.message.answer(prompt)
@@ -680,6 +688,8 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
     note = "Sačuvano"
     if parts[1] == "toggle":
         s.paper = not s.paper
+        if s.paper and not s.bot_since:
+            s.bot_since = time.time()  # the balance counts from the first time the test is on
         note = ("🧪 Test uključen – prve rezultate dobijaš posle sledećeg skeniranja" if s.paper
                 else "Test isključen")
         if s.paper and s.mode != "crypto":
@@ -692,6 +702,9 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
         s.bot_stake = number(parts[2])
     elif parts[1] == "bank":
         s.bot_bank = number(parts[2])
+    elif parts[1] == "reset":
+        s.bot_since = time.time()
+        note = "🔄 Kreće ispočetka: balans = početni budžet"
     store.save()
     await safe_edit(c, bot_text(s, service, c.from_user.id), kb.bot_kb(s))
     await c.answer(note, show_alert=parts[1] == "toggle" and s.paper and s.mode != "crypto")
@@ -785,19 +798,19 @@ class Notifier:
                 continue  # tested already with these same odds
             todo.append(a)
         for a in todo[:PAPER_PER_ROUND]:
-            free = s.bot_bank - await asyncio.to_thread(paper.in_play, uid)
+            free = (await asyncio.to_thread(paper.ledger, uid, s.bot_bank, s.bot_since)).free
             if free < paper.MIN_STAKE:  # the whole budget is in play: wait for matches to end
                 if uid not in self.paper_full:
                     self.paper_full.add(uid)
                     await self.bot.send_message(
-                        uid, f"💼 Ceo budžet ({money(s.bot_bank, '$')} $) je u igri – test čeka da se mečevi završe. "
-                             "Budžet menjaš u /bot.")
+                        uid, "💼 Ceo balans je u igri – test čeka da se mečevi završe i novac vrati. "
+                             "Stanje vidiš u /bot.")
                 break
             self.paper_full.discard(uid)
             seen[arb_key(a)] = (time.time(), _legs_sig(a))
             r = await paper.run_test(self.service, a, s, s.currency, min(s.bot_stake, free))
             if r.status in paper.PLACED:
-                r.free = free - r.total
+                r.free, r.settles = free - r.total, paper.settles_at(r.start)
             await asyncio.to_thread(paper.save, uid, r)
             log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
             if r.status in (paper.GONE, paper.NO_FIT):

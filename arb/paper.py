@@ -27,7 +27,7 @@ EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills 
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
 MIN_STAKE = 5.0  # $ - below this a test isn't worth it
-SETTLE_HOURS = 3  # a bet's money is back in the budget this long after kickoff (the match is over)
+SETTLE_HOURS = 3  # a bet is settled this long after kickoff: the match is over, stake + profit back on the balance
 PLACED = ("ok", "ok_less", "miss", "unknown")  # statuses where money would really have been bet
 
 # result statuses
@@ -69,7 +69,8 @@ class PaperResult:
     legs: list[LegTest] = field(default_factory=list)
     hedge: str = ""  # on a miss: where it would be covered
     cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
-    free: float | None = None  # /bot budget left free after this bet (None = not tracked)
+    free: float | None = None  # /bot balance left free after this bet (None = not tracked)
+    settles: float | None = None  # /bot: when this bet's match is over and its profit goes onto the balance
     at: float = field(default_factory=time.time)
 
 
@@ -210,20 +211,56 @@ def save(uid: int, r: PaperResult) -> None:
                                             "start": r.start, "sport": r.sport})))
 
 
-def in_play(uid: int, now: float | None = None) -> float:
-    """$ of this user's tested bets whose match isn't over yet (still tied up in the budget)."""
+def settles_at(start_iso: str) -> float | None:
+    """time.time() when a bet on a match starting at `start_iso` counts as settled."""
+    try:
+        return datetime.fromisoformat(start_iso).timestamp() + SETTLE_HOURS * 3600
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
+class Ledger:
+    """The /bot balance: the starting budget plus the profit of tested bets whose match
+    is over. Bets on matches still to be played tie up their stake ("in play") and
+    their profit waits - an arb pays out after the match, not when it is found."""
+    bank: float
+    settled_profit: float = 0.0
+    settled_n: int = 0
+    in_play: float = 0.0
+    pending_profit: float = 0.0
+    open_n: int = 0
+    next_settle: float | None = None  # when the first open bet settles
+
+    @property
+    def balance(self) -> float:
+        return self.bank + self.settled_profit
+
+    @property
+    def free(self) -> float:
+        return self.balance - self.in_play
+
+
+def ledger(uid: int, bank: float, since: float = 0.0, now: float | None = None) -> Ledger:
     now = time.time() if now is None else now
-    total = 0.0
-    for r in load(uid, now - 14 * 86400):  # bets on matches up to two weeks ahead
+    out = Ledger(bank)
+    for r in load(uid, since):
         if r["status"] not in PLACED:
             continue
-        try:
-            end = datetime.fromisoformat(r["detail"]["start"]).timestamp() + SETTLE_HOURS * 3600
-        except (KeyError, ValueError):
+        end = settles_at(r["detail"].get("start"))
+        if end is None:
             continue
-        if end > now:
-            total += r["total"]
-    return total
+        # "unknown": the last leg was never confirmed - its stake counts, no profit is assumed
+        profit = 0.0 if r["status"] == UNKNOWN else r["profit"]
+        if end <= now:
+            out.settled_profit += profit
+            out.settled_n += 1
+        else:
+            out.in_play += r["total"]
+            out.pending_profit += profit
+            out.open_n += 1
+            out.next_settle = min(out.next_settle or end, end)
+    return out
 
 
 def load(uid: int, since: float) -> list[dict]:
