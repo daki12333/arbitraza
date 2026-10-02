@@ -55,9 +55,9 @@ def money(x: float, currency: str = "din") -> str:
 
 
 def dur(seconds: float) -> str:
-    """2.1 -> "2,1 s", 151 -> "2 min 31 s"."""
+    """2.1 -> "2,1 s", 5 -> "5 s", 151 -> "2 min 31 s"."""
     if seconds < 60:
-        return f"{seconds:.1f} s".replace(".", ",")
+        return f"{seconds:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " s"
     m, s = divmod(round(seconds), 60)
     return f"{m} min {s} s" if s else f"{m} min"
 
@@ -416,6 +416,9 @@ def paper_text(r, currency: str = "$") -> str:
         lines.append(f"⏳ na balans ide kad se meč završi (oko {datetime.fromtimestamp(r.settles, TZ):%H:%M})")
     if r.free is not None:
         lines.append(f"💼 slobodno za nove posle ove: {money(max(r.free, 0), currency)} {currency}")
+    if r.wallets:
+        lines.append("💼 slobodno posle ove: " + " · ".join(f"{b} {money(v, currency)} {currency}"
+                                                          for b, v in r.wallets.items()))
     return "\n".join(lines)
 
 

@@ -94,7 +94,7 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
 BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
 BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
 BOT_STAKES = [10, 25, 50, 100, 250]
-BOT_BANKS = [100, 250, 500, 1_000, 2_500]
+BOT_DELAYS = [5, 30, 60, 150, 300]  # s between the first and the last leg
 
 
 def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
@@ -113,13 +113,32 @@ def bot_kb(s: UserSettings) -> InlineKeyboardMarkup:
         mark = "✅ " if a == s.bot_stake else ""
         b.button(text=f"{mark}💵 {a} $", callback_data=f"bt:st:{a}")
     b.button(text="✏️ Upiši max ulog", callback_data="bt:scustom")
-    for a in BOT_BANKS:
-        mark = "✅ " if a == s.bot_bank else ""
-        b.button(text=f"{mark}💼 {money(a, '$')} $", callback_data=f"bt:bank:{a}")
-    b.button(text="✏️ Upiši početni budžet", callback_data="bt:bcustom")
+    for d in BOT_DELAYS:
+        mark = "✅ " if d == s.bot_delay else ""
+        b.button(text=f"{mark}⏱ {d} s" if d < 60 else f"{mark}⏱ {d / 60:g} min".replace(".", ","),
+                 callback_data=f"bt:d:{d}")
+    b.button(text="💼 Novac po kladionicama" + (f" ({len(s.bot_wallets)})" if s.bot_wallets else ""),
+             callback_data="bt:wallets")
+    rows = [1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1]
+    if not s.bot_wallets:  # one shared budget only while no money per bookie is set
+        b.button(text=f"✏️ Zajednički budžet: {money(s.bot_bank, '$')} $", callback_data="bt:bcustom")
+        rows.append(1)
     b.button(text="📊 Izveštaj (danas)", callback_data="bt:report")
+    b.button(text="📊 Parovi kladionica", callback_data="bt:pairs")
     b.button(text="🔄 Kreni ispočetka", callback_data="bt:reset")
-    b.adjust(1, 3, 3, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 2)
+    b.adjust(*rows, 2, 1)
+    return b.as_markup()
+
+
+def wallets_kb(s: UserSettings) -> InlineKeyboardMarkup:
+    """💼 money per bookie: tap one, then type the amount."""
+    b = InlineKeyboardBuilder()
+    names = s.mode_bookies
+    for name in names:
+        have = s.bot_wallets.get(name)
+        b.button(text=f"✅ {name}: {money(have, '$')} $" if have else f"⬜ {name}", callback_data=f"bw:{name}")
+    b.button(text="⬅️ Nazad na /bot", callback_data="bt:back")
+    b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), 1)
     return b.as_markup()
 
 

@@ -71,10 +71,14 @@ Ostalo:
 - `/bot`: 🧪 **test na papiru** (samo kripto), sa svojim pravilima, odvojenim od obaveštenja:
   - ⏰ meč počinje u narednih N sati (1 / 3 / 6 / 12 / 24 h, bilo kad ili upišeš svoje)
   - 📈 najmanji profit u %
-  - 💵 najveći ulog po arbitraži u $; ako kladionica ili Polymarket ponuda ne prima toliko, uzima manje (najmanje 5 $)
-  - 💼 početni budžet (balans) u $: deli se na više arbitraža odjednom (npr. 500 $ i max 100 $ = do 5 istovremeno). Ulog je „u igri“ dok se meč ne završi (računa se 3 h posle početka); tek tada se ulog i zarada vraćaju na balans. `/bot` pokazuje balans, koliko je u igri, zaradu koja čeka i koliko je slobodno. Kad nema slobodnog novca, test čeka. 🔄 Kreni ispočetka vraća balans na početni budžet
+  - 💵 najveći ulog po arbitraži u $; manje ako kladionica ili Polymarket ponuda ne prima toliko (najmanje 5 $)
+  - ⏱ koliko posle prve noge ide druga: 5 s (novac je već na obe kladionice) do 5 min (novac se prvo šalje, npr. preko Solane)
+  - 💼 **novac po kladionicama**: upišeš koliko imaš na kojoj (npr. 1xBit 25 $, Polymarket 25 $). Test igra samo arbitraže između tih kladionica, a bot sam računa podelu: nijedna strana ne dobija više nego što tamo ima (podela 70/30 sa 25 $ + 25 $ → oko 25 $ + 10,7 $). Bez toga se koristi jedan zajednički budžet.
+  - ulog je „u igri“ dok se meč ne završi (računa se 3 h posle početka); tada se ulog i zarada vraćaju na kladionicu na kojoj je opklada prošla (test ne zna pravi ishod, pa ga izvlači po kvotama). `/bot` pokazuje balans, novac na svakoj kladionici, šta je u igri i koliko zarade čeka; ⚖️ predloži prebacivanje kad jedna strana ostane bez novca
+  - 📊 **Parovi kladionica**: koji parovi su najčešći u arbitražama koje prolaze tvoja pravila (poslednja 24 h), da znaš gde da staviš novac
+  - 🔄 Kreni ispočetka: balans opet kreće od upisanog novca
 
-  Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle **2,5 min** (koliko traje prebacivanje novca, npr. preko Solane) ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno, a ulog se odmah rezerviše iz balansa. Mečevi koji počinju pre druge uplate se preskaču. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
+  Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle izabranog vremena ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno, a ulog se odmah rezerviše. Mečevi koji počinju pre druge uplate se preskaču. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.
 - `📊 Status`: da li sve kladionice rade i koliko je mečeva upareno
 

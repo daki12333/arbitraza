@@ -33,6 +33,9 @@ class UserSettings:
     bot_bank: float = 500  # starting balance ($): a tested bet's stake is "in play" until its match ends,
     # and only then its profit goes onto the balance (arb.paper.ledger)
     bot_since: float = 0.0  # time.time() the balance counts from (set when the test is first turned on / reset)
+    # money on each bookie ($) - set: the test plays only these bookies, each leg within what's there
+    bot_wallets: dict[str, float] = field(default_factory=dict)
+    bot_delay: float = 5.0  # s from the first leg to the last (longer if the money has to be sent over first)
     list_hours: int = 0  # list only matches starting within this many hours (0 = all)
     list_sort: str = "pct"  # "pct" = best profit first, "time" = soonest first
     # store the switched-OFF ones, so newly added bookies are on by default

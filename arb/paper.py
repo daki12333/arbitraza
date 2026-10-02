@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import random
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -22,7 +24,8 @@ from arb.tg.formatting import outcome_text
 from arb.tg.service import arb_key, group_key
 
 DB_FILE = DATA_DIR / "paper.db"
-EXEC_DELAY = 150.0  # s - from the first leg to the last: moving the money over (e.g. Solana) takes ~2 min
+EXEC_DELAY = 5.0  # s - from the first leg to the last when the money already sits on both bookies
+# (/bot can set it longer, e.g. 150 s when the money has to be sent over Solana first)
 EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills instantly, "all or nothing")
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
@@ -68,9 +71,13 @@ class PaperResult:
     seconds: float = 0.0  # from betting the first leg to the last leg's check (what a real bet would wait)
     legs: list[LegTest] = field(default_factory=list)
     hedge: str = ""  # on a miss: where it would be covered
+    hedge_bookie: str = ""
+    hedge_stake: float = 0.0
+    hedge_odd: float = 0.0
     cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
     free: float | None = None  # /bot balance left free after this bet (None = not tracked)
     settles: float | None = None  # /bot: when this bet's match is over and its profit goes onto the balance
+    wallets: dict[str, float] | None = None  # /bot: money free on each bookie after this bet
     at: float = field(default_factory=time.time)
 
 
@@ -95,14 +102,36 @@ def _leg_now(leg: Leg, ev: Event | None, stake: float) -> tuple[float | None, fl
     return pay / stake, pay
 
 
-def fit_stake(arb: Arb, max_stake: float, currency: str = "$") -> float | None:
+def by_bookie(rows) -> dict[str, float]:
+    """Stake per bookie of plan() rows (two legs can sit on the same bookie)."""
+    out: dict[str, float] = {}
+    for leg, stake, _ in rows:
+        out[leg.bookie] = out.get(leg.bookie, 0.0) + stake
+    return out
+
+
+def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
+              caps: dict[str, float] | None = None) -> float | None:
     """The biggest total up to `max_stake` that this arb takes: the full amount if every leg
-    fits, otherwise less (a bookie limit / thin Polymarket book). None = not even MIN_STAKE."""
+    fits, otherwise less (a bookie limit / thin Polymarket book). With `caps` (money on each
+    bookie) no bookie's legs may need more than it has: if the split is 70/30 and each side
+    has 25 $, the total is ~35 $, not 50 $. None = not even MIN_STAKE."""
     stake = max_stake
+    if caps is not None:  # start where the tightest bookie runs out
+        need: dict[str, float] = {}
+        for leg, st in zip(arb.legs, arb.split(max_stake)):
+            need[leg.bookie] = need.get(leg.bookie, 0.0) + st
+        ratio = min((caps.get(b, 0.0) / st for b, st in need.items() if st > 0), default=1.0)
+        stake = math.floor(max_stake * min(ratio, 1.0) * 2) / 2
     while stake >= MIN_STAKE - 1e-9:
-        if arb.plan(stake, currency):
-            return stake
-        stake = round(stake * 0.75 * 2) / 2  # 100 -> 75 -> 56 -> 42 ... on half-dollars
+        rows = arb.plan(stake, currency)
+        if rows and (caps is None or all(st <= caps.get(b, 0.0) + 1e-9 for b, st in by_bookie(rows).items())):
+            over = sum(st for _, st, _ in rows) - max_stake
+            if over <= 1e-9:
+                return stake
+            stake -= math.ceil(over * 2) / 2  # rounded stakes went above the max: just that much lower
+            continue
+        stake = round(stake * 0.9 * 2) / 2  # 100 -> 90 -> 81 ... on half-dollars
     return None
 
 
@@ -123,9 +152,10 @@ async def refetch(service, arb: Arb, bookies: set[str]) -> dict[str, Event | Non
     return out
 
 
-async def run_test(service, arb: Arb, s, currency: str, budget: float | None = None) -> PaperResult:
+async def run_test(service, arb: Arb, s, currency: str, budget: float | None = None,
+                   caps: dict[str, float] | None = None, delay: float = EXEC_DELAY) -> PaperResult:
     """One paper bet on this arb for user settings `s`, with total stake `budget`
-    (default: the user's budget)."""
+    (default: the user's budget), no bookie above its `caps`, the last leg `delay` s after the first."""
     budget = s.budget if budget is None else budget
     t0 = time.perf_counter()
     ev = arb.event
@@ -138,7 +168,7 @@ async def run_test(service, arb: Arb, s, currency: str, budget: float | None = N
         res.seconds = time.perf_counter() - t0
         return res
     a = fresh[0]
-    stake = fit_stake(a, budget, currency)  # the fresh odds may take less than the scan's
+    stake = fit_stake(a, budget, currency, caps)  # the fresh odds may take less than the scan's
     rows = a.plan(stake, currency) if stake else None
     if not rows:
         res.status, res.seconds = NO_FIT, time.perf_counter() - t0
@@ -154,7 +184,7 @@ async def run_test(service, arb: Arb, s, currency: str, budget: float | None = N
     *_, (last_leg, last_stake, last_payout) = rows
     lt = res.legs[-1]
     t1 = time.perf_counter()  # the first leg goes in now
-    await asyncio.sleep(EXEC_DELAY)
+    await asyncio.sleep(delay)
     now = await refetch(service, a, {last_leg.bookie})
     res.seconds = time.perf_counter() - t1
     if last_leg.bookie not in now:
@@ -175,8 +205,8 @@ async def run_test(service, arb: Arb, s, currency: str, budget: float | None = N
     # 3) a miss: cover the uncovered bet with the best price elsewhere in the group right now
     best = (lt.now_odd, last_leg.bookie) if lt.now_odd else None  # the moved price itself is an option
     for e in service.groups.get(group_key(a.events)) or a.events:
-        if e.bookie == last_leg.bookie:
-            continue
+        if e.bookie == last_leg.bookie or e.bookie not in s.bookies:
+            continue  # only where the user can bet
         odd = e.markets.get(last_leg.market, {}).get(last_leg.outcome)
         if odd and (best is None or odd > best[0]):
             best = (odd, e.bookie)
@@ -185,6 +215,7 @@ async def run_test(service, arb: Arb, s, currency: str, budget: float | None = N
         # cover with a stake that pays the same as the bets already placed
         cover = min(placed) / best[0]
         res.hedge = f"{best[1]} @ {best[0]:g}, ulog {cover:.2f} $".replace(".", ",")
+        res.hedge_bookie, res.hedge_stake, res.hedge_odd = best[1], cover, best[0]
         res.profit = min(placed) - placed_stakes - cover
     else:
         res.hedge = ""
@@ -208,7 +239,8 @@ def save(uid: int, r: PaperResult) -> None:
         con.execute("INSERT INTO tests VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (r.at, uid, r.key, r.name, r.market, r.status, r.total, r.profit, r.planned_profit,
                      r.seconds, json.dumps({"legs": [asdict(l) for l in r.legs], "hedge": r.hedge,
-                                            "start": r.start, "sport": r.sport})))
+                                            "hedge_bookie": r.hedge_bookie, "hedge_stake": r.hedge_stake,
+                                            "hedge_odd": r.hedge_odd, "start": r.start, "sport": r.sport})))
 
 
 def settles_at(start_iso: str) -> float | None:
@@ -221,10 +253,17 @@ def settles_at(start_iso: str) -> float | None:
 
 @dataclass
 class Ledger:
-    """The /bot balance: the starting budget plus the profit of tested bets whose match
+    """The /bot balance: the starting money plus the profit of tested bets whose match
     is over. Bets on matches still to be played tie up their stake ("in play") and
-    their profit waits - an arb pays out after the match, not when it is found."""
-    bank: float
+    their profit waits - an arb pays out after the match, not when it is found.
+
+    With money per bookie (`start`), every stake leaves its bookie when it is bet and,
+    after the match, the whole return lands on the bookie of the leg that won - like
+    for real, so the money piles up on one side. The test doesn't know real results:
+    the winner is drawn by the odds (a 2.0 leg wins half the time)."""
+    bank: float  # starting money in total
+    start: dict[str, float] = field(default_factory=dict)  # starting money per bookie (empty = one shared budget)
+    cash: dict[str, float] = field(default_factory=dict)  # money on each bookie now, not in play
     settled_profit: float = 0.0
     settled_n: int = 0
     in_play: float = 0.0
@@ -241,26 +280,80 @@ class Ledger:
         return self.balance - self.in_play
 
 
-def ledger(uid: int, bank: float, since: float = 0.0, now: float | None = None) -> Ledger:
+def _flows(r: dict) -> tuple[dict[str, float], list[tuple[str, float]]]:
+    """A stored test's stake per bookie, and the bets that can win: (bookie, odd)."""
+    d = r["detail"]
+    legs = d.get("legs") or []
+    if not legs:  # nothing to split by bookie: the whole stake counts, on no bookie in particular
+        return {"": r["total"]}, [("", 1.0)]
+    spent: dict[str, float] = {}
+    can_win: list[tuple[str, float]] = []
+    for i, l in enumerate(legs):
+        if i == len(legs) - 1 and r["status"] == MISS:  # the last leg was never bet...
+            if d.get("hedge_bookie"):  # ...it was covered elsewhere
+                b = d["hedge_bookie"]
+                spent[b] = spent.get(b, 0.0) + d.get("hedge_stake", 0.0)
+                can_win.append((b, d.get("hedge_odd") or l["odd"]))
+            continue  # uncovered: if that side wins, nobody pays
+        spent[l["bookie"]] = spent.get(l["bookie"], 0.0) + l["stake"]
+        can_win.append((l["bookie"], l.get("now_odd") or l["odd"]))
+    return spent, can_win
+
+
+def _winner(r: dict, can_win: list[tuple[str, float]]) -> str | None:
+    """The bookie whose bet won - drawn by the odds, the same every time for this test."""
+    if not can_win:
+        return None
+    rng = random.Random(f"{r['key']}|{r['at']}")
+    return rng.choices([b for b, _ in can_win], weights=[1 / o for _, o in can_win])[0]
+
+
+def ledger(uid: int, bank: float, since: float = 0.0, now: float | None = None,
+           start: dict[str, float] | None = None) -> Ledger:
     now = time.time() if now is None else now
-    out = Ledger(bank)
+    start = dict(start or {})
+    out = Ledger(sum(start.values()) if start else bank, start, dict(start))
     for r in load(uid, since):
         if r["status"] not in PLACED:
             continue
         end = settles_at(r["detail"].get("start"))
         if end is None:
             continue
+        spent, can_win = _flows(r)
+        total = sum(spent.values())
+        for b, st in spent.items():
+            out.cash[b] = out.cash.get(b, 0.0) - st
         # "unknown": the last leg was never confirmed - its stake counts, no profit is assumed
         profit = 0.0 if r["status"] == UNKNOWN else r["profit"]
         if end <= now:
             out.settled_profit += profit
             out.settled_n += 1
+            if (w := _winner(r, can_win)) is not None:
+                out.cash[w] = out.cash.get(w, 0.0) + total + profit
         else:
-            out.in_play += r["total"]
+            out.in_play += total
             out.pending_profit += profit
             out.open_n += 1
             out.next_settle = min(out.next_settle or end, end)
     return out
+
+
+def rebalance(led: Ledger) -> tuple[str, str, float] | None:
+    """(from, to, $) when one bookie has run low and another has more than its share
+    (shares as in the starting money). None = no need to move anything."""
+    if len(led.start) < 2:
+        return None
+    total = sum(max(led.cash.get(b, 0.0), 0.0) for b in led.start)
+    weight = sum(led.start.values())
+    if total < 2 * MIN_STAKE or not weight:
+        return None
+    target = {b: total * v / weight for b, v in led.start.items()}
+    low = min(led.start, key=lambda b: led.cash.get(b, 0.0) / target[b] if target[b] else 1.0)
+    if led.cash.get(low, 0.0) >= 0.5 * target[low]:
+        return None
+    high = max(led.start, key=lambda b: led.cash.get(b, 0.0) - target[b])
+    amount = math.floor(min(target[low] - led.cash.get(low, 0.0), led.cash.get(high, 0.0) - target[high]))
+    return (high, low, float(amount)) if high != low and amount >= MIN_STAKE else None
 
 
 def load(uid: int, since: float) -> list[dict]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, F, Router
@@ -314,16 +314,29 @@ def paper_report_for(uid: int, s: UserSettings) -> str:
     return paper_report(paper.load(uid, midnight.timestamp()), "danas (od 00:00)", s.currency)
 
 
-def bot_stake_for(arb: Arb, s: UserSettings) -> float | None:
+def bot_view(s: UserSettings) -> UserSettings:
+    """The user's settings as the /bot test sees them: with money set per bookie, only
+    those bookies (so arbs are looked for among them, not just filtered)."""
+    if not s.bot_wallets:
+        return s
+    return replace(s, disabled=[b for b in s.mode_bookies if b not in s.bot_wallets])
+
+
+def bot_ledger(uid: int, s: UserSettings) -> paper.Ledger:
+    return paper.ledger(uid, s.bot_bank, s.bot_since, start=s.bot_wallets or None)
+
+
+def bot_stake_for(arb: Arb, s: UserSettings, caps: dict[str, float] | None = None) -> float | None:
     """The total the /bot test would put into this arb: up to bot_stake, less if the
-    bookies take less. None = the arb doesn't pass the /bot rules."""
+    bookies take less or (with `caps`, money per bookie) one side doesn't have enough.
+    None = the arb doesn't pass the /bot rules."""
     if arb.suspicious:
         return None
     if s.bot_hours and arb.event.start > datetime.now(timezone.utc) + timedelta(hours=s.bot_hours):
         return None
-    if arb.event.start < datetime.now(timezone.utc) + timedelta(seconds=paper.EXEC_DELAY):
+    if arb.event.start < datetime.now(timezone.utc) + timedelta(seconds=s.bot_delay):
         return None  # starts before the last leg would go in (pre-match odds only)
-    stake = paper.fit_stake(arb, s.bot_stake, s.currency)
+    stake = paper.fit_stake(arb, s.bot_stake, s.currency, caps)
     if stake is None or arb.pct_for(stake, s.currency) < s.bot_min:
         return None
     return stake
@@ -336,34 +349,80 @@ def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None
         "Igra sve arbitraže koje:",
         f"⏰ počinju {when}",
         f"📈 imaju profit <b>{s.bot_min:g}%</b> ili više",
-        f"💵 sa ulogom do <b>{money(s.bot_stake, '$')} $</b> po arbitraži (manje ako kladionica ili Polymarket ne prima toliko)",
+        f"💵 sa ulogom do <b>{money(s.bot_stake, '$')} $</b> po arbitraži (manje ako kladionica ili Polymarket ne prima "
+        "toliko" + (", ili na nekoj strani nema dovoljno novca)" if s.bot_wallets else ")"),
+        f"⏱ druga noga ide <b>{dur(s.bot_delay)}</b> posle prve",
     ]
     if uid is not None:
-        led = paper.ledger(uid, s.bot_bank, s.bot_since)
+        led = bot_ledger(uid, s)
+        lines.append("")
+        if s.bot_wallets:
+            lines.append("💼 <b>Novac po kladionicama</b> (početno → slobodno sada):")
+            for b, v in s.bot_wallets.items():
+                lines.append(f"   {b}: {money(v, '$')} $ → <b>{money(max(led.cash.get(b, 0.0), 0), '$')} $</b>")
         lines += [
-            "",
-            f"💼 <b>Balans: {money(led.balance, '$')} $</b>",
-            f"   početno {money(s.bot_bank, '$')} $ · zarada od završenih mečeva {signed(led.settled_profit, '$')} $"
-            f" ({led.settled_n})",
+            f"💰 <b>Balans: {money(led.balance, '$')} $</b>  (početno {money(led.bank, '$')} $ · zarada od završenih "
+            f"mečeva {signed(led.settled_profit, '$')} $, {led.settled_n})",
             f"⏳ U igri: {money(led.in_play, '$')} $ (mečeva: {led.open_n}) · čeka zarada {signed(led.pending_profit, '$')} $"
             + (f" (prva oko {datetime.fromtimestamp(led.next_settle, TZ):%H:%M})" if led.next_settle else ""),
-            f"✅ Slobodno za nove: <b>{money(max(led.free, 0), '$')} $</b>",
-            "",
-            "Zarada ulazi u balans tek kad se meč završi (računa se 3 h posle početka). "
-            "Kad nema slobodnog novca, bot čeka.",
         ]
+        if not s.bot_wallets:
+            lines.append(f"✅ Slobodno za nove: <b>{money(max(led.free, 0), '$')} $</b>")
+        if move := paper.rebalance(led):
+            lines.append(f"⚖️ <b>Prebaci {money(move[2], '$')} $ sa {move[0]} na {move[1]}</b>")
+        lines += ["", "Ulog i zarada se vraćaju tek kad se meč završi (3 h posle početka)"
+                  + (", i to na kladionicu na kojoj je opklada prošla (test ne zna pravi ishod, "
+                     "pa ga izvlači po kvotama)." if s.bot_wallets else ".") + " Kad nema slobodnog novca, bot čeka."]
+        if not s.bot_wallets:
+            lines.append("💡 Upiši 💼 koliko imaš na kojoj kladionici – test tada igra samo tamo.")
     if service is not None and s.mode == "crypto" and service.covers(s):
-        n = sum(1 for a in service.arbs_for(s) if bot_stake_for(a, s) is not None)
-        lines.append(f"\n🔎 Trenutno ovo prolazi: <b>{n}</b> arbitraža")
+        view = bot_view(s)
+        n = sum(1 for a in service.arbs_for(view) if bot_stake_for(a, view) is not None)
+        lines.append(f"\n🔎 Trenutno ovo prolazi: <b>{n}</b> arbitraža"
+                     + (" (na tvojim kladionicama)" if s.bot_wallets else ""))
     lines += [
         "",
         "🧪 <b>Samo test</b> – ništa se ne uplaćuje. Za svaku arbitražu bot proveri kvote uživo, "
-        f"„uplati“ prvu nogu, posle {dur(paper.EXEC_DELAY)} ponovo proveri poslednju (toliko traje prebacivanje novca) "
+        f"„uplati“ prvu nogu, posle {dur(s.bot_delay)} ponovo proveri poslednju "
         "i javi ti da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno. "
         "Uveče stiže izveštaj.",
     ]
     if s.mode != "crypto":
         lines.append("\n⚠️ Test radi samo sa 🪙 kripto kladionicama – prebaci u 🏦 Kladionice → 🪙 Prebaci na kripto.")
+    return "\n".join(lines)
+
+
+def wallets_text(s: UserSettings) -> str:
+    lines = ["💼 <b>Koliko imaš na kojoj kladionici?</b>", "",
+             "Klikni kladionicu i upiši iznos u $ (0 = nemaš ništa tamo). Test igra samo arbitraže "
+             "između kladionica gde imaš novac, i nijedna strana ne dobija više nego što tamo ima.", ""]
+    if s.bot_wallets:
+        lines += [f"• {b}: <b>{money(v, '$')} $</b>" for b, v in s.bot_wallets.items()]
+        lines.append(f"Ukupno: <b>{money(sum(s.bot_wallets.values()), '$')} $</b>")
+    else:
+        lines.append("Još ništa nije upisano – test sad koristi jedan zajednički budžet za sve kladionice.")
+    lines += ["", "Kad promeniš iznose, klikni 🔄 Kreni ispočetka u /bot da balans krene od njih."]
+    return "\n".join(lines)
+
+
+# /bot 📊 Parovi: arb key -> (bookies of the arb, first seen) per user, the last 24 h
+pair_log: dict[int, dict[str, tuple[tuple[str, ...], float]]] = {}
+PAIR_HOURS = 24
+
+
+def pairs_text(uid: int) -> str:
+    seen = pair_log.get(uid, {})
+    if not seen:
+        return "📊 <b>Parovi kladionica</b>\n\nJoš nema podataka – skupljam posle svakog skeniranja."
+    count: dict[tuple[str, ...], int] = {}
+    for pair, _ in seen.values():
+        count[pair] = count.get(pair, 0) + 1
+    hours = min(PAIR_HOURS, (time.time() - min(t for _, t in seen.values())) / 3600)
+    lines = [f"📊 <b>Parovi kladionica</b> – arbitraže koje prolaze tvoja pravila iz /bot, "
+             f"poslednjih {max(hours, 0.1):.1f} h".replace(".", ",") + f" ({len(seen)} ukupno):", ""]
+    for i, (pair, n) in enumerate(sorted(count.items(), key=lambda x: -x[1])[:10], 1):
+        lines.append(f"{i}. {' + '.join(pair)}: <b>{n}</b> ({n / len(seen) * 100:.0f}%)")
+    lines += ["", "Najčešći par je dobar izbor za mali budžet: novac podeliš na te dve kladionice."]
     return "\n".join(lines)
 
 
@@ -452,7 +511,12 @@ async def typed_notify_hours(m: Message, store: Storage) -> None:
     await m.answer(notify_text(s), reply_markup=kb.notify_kb(s))
 
 
-@router.message(F.text, lambda m: awaiting.get(m.from_user.id) in ("bot_h", "bot_min", "bot_stake", "bot_bank"))
+def _awaiting_bot(m: Message) -> bool:
+    v = awaiting.get(m.from_user.id)
+    return isinstance(v, str) and (v in ("bot_h", "bot_min", "bot_stake", "bot_bank") or v.startswith("bw:"))
+
+
+@router.message(F.text, _awaiting_bot)
 async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
     what = awaiting[m.from_user.id]
     s = store.get(m.from_user.id)
@@ -471,6 +535,21 @@ async def typed_bot(m: Message, service: ArbService, store: Storage) -> None:
             await m.answer("Upiši procenat između 0 i 50, npr. <code>1.5</code>")
             return
         s.bot_min = value
+    elif what.startswith("bw:"):  # money on one bookie
+        match = re.match(r"^(\d+(?:[.,]\d+)?)\s*\$?$", text)
+        value = round(float(match.group(1).replace(",", ".")), 2) if match else -1
+        if not 0 <= value <= 1_000_000:
+            await m.answer("Upiši iznos u $, npr. <code>25</code> (0 = nemaš ništa na toj kladionici)")
+            return
+        name = what[3:]
+        if value:
+            s.bot_wallets[name] = number(str(value))
+        else:
+            s.bot_wallets.pop(name, None)
+        awaiting.pop(m.from_user.id, None)
+        store.save()
+        await m.answer(wallets_text(s), reply_markup=kb.wallets_kb(s))
+        return
     else:
         match = re.match(r"^(\d+(?:[.,]\d+)?)\s*\$?$", text)
         value = round(float(match.group(1).replace(",", ".")) * 2) / 2 if match else -1
@@ -687,6 +766,14 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
         await c.answer()
         await c.message.answer(paper_report_for(c.from_user.id, s))
         return
+    if parts[1] == "pairs":
+        await c.answer()
+        await c.message.answer(pairs_text(c.from_user.id))
+        return
+    if parts[1] == "wallets":
+        await safe_edit(c, wallets_text(s), kb.wallets_kb(s))
+        await c.answer()
+        return
     note = "Sačuvano"
     if parts[1] == "toggle":
         s.paper = not s.paper
@@ -704,12 +791,30 @@ async def cb_bot(c: CallbackQuery, service: ArbService, store: Storage) -> None:
         s.bot_stake = number(parts[2])
     elif parts[1] == "bank":
         s.bot_bank = number(parts[2])
+    elif parts[1] == "d":
+        s.bot_delay = float(parts[2])
+    elif parts[1] == "back":
+        note = ""
     elif parts[1] == "reset":
         s.bot_since = time.time()
-        note = "🔄 Kreće ispočetka: balans = početni budžet"
+        note = "🔄 Kreće ispočetka: balans = " + ("novac po kladionicama" if s.bot_wallets else "početni budžet")
     store.save()
     await safe_edit(c, bot_text(s, service, c.from_user.id), kb.bot_kb(s))
     await c.answer(note, show_alert=parts[1] == "toggle" and s.paper and s.mode != "crypto")
+
+
+@router.callback_query(F.data.startswith("bw:"))
+async def cb_wallet(c: CallbackQuery, store: Storage) -> None:
+    """💼 a bookie tapped in the money-per-bookie panel: its amount comes as the next message."""
+    s = store.get(c.from_user.id)
+    name = c.data[3:]
+    if name not in s.mode_bookies:
+        await c.answer()
+        return
+    awaiting[c.from_user.id] = f"bw:{name}"
+    now = f" (sad: {money(s.bot_wallets[name], '$')} $)" if name in s.bot_wallets else ""
+    await c.message.answer(f"✏️ Koliko imaš na <b>{name}</b>{now}? Upiši iznos u $, npr. <code>25</code> (0 = ništa):")
+    await c.answer()
 
 
 @router.callback_query(F.data.startswith("set:"))
@@ -770,13 +875,15 @@ class Notifier:
         self.paper_seen: dict[int, dict[str, tuple[float, tuple]]] = {}  # uid -> arb key -> (tested at, legs)
         self.paper_reported: dict[int, str] = {}  # uid -> date of the last evening report
         self.paper_full: set[int] = set()  # users told their /bot budget is all in play
-        # tests still waiting for their last leg: uid -> arb key -> $ reserved from the balance
-        self.paper_running: dict[int, dict[str, float]] = {}
+        # tests still waiting for their last leg: uid -> arb key -> $ reserved on each bookie
+        self.paper_running: dict[int, dict[str, dict[str, float]]] = {}
+        self.paper_moved: dict[int, tuple | None] = {}  # uid -> the last "⚖️ prebaci" suggestion sent
         self.paper_jobs: set[asyncio.Task] = set()
 
     async def __call__(self) -> None:
         await self.update_lists()
         await self.notify_new()
+        self.log_pairs()
         # paper tests run in the background: they wait for bookies and must not hold up the scans
         if (self.paper_task is None or self.paper_task.done()) and any(
                 s.paper and s.mode == "crypto" for s in self.store.users.values()):
@@ -791,52 +898,104 @@ class Notifier:
             except Exception:
                 log.exception("paper round %s failed", uid)
 
-    async def _paper_free(self, uid: int, s: UserSettings) -> float:
-        """Balance free for a new test: minus what's in play and what running tests hold."""
-        led = await asyncio.to_thread(paper.ledger, uid, s.bot_bank, s.bot_since)
-        return led.free - sum(self.paper_running.get(uid, {}).values())
+    def log_pairs(self) -> None:
+        """/bot 📊 Parovi: which bookies the arbs passing the /bot rules use (all the user's
+        bookies, not only those with money - that's what helps pick where to put it)."""
+        now = time.time()
+        for uid, s in list(self.store.users.items()):
+            if s.mode != "crypto" or not allowed(uid) or not self.service.covers(s):
+                continue
+            log_ = pair_log.setdefault(uid, {})
+            for a in self.service.arbs_for(s):
+                k = arb_key(a)
+                if k not in log_ and bot_stake_for(a, s) is not None:
+                    log_[k] = (tuple(sorted({l.bookie for l in a.legs})), now)
+            for k in [k for k, (_, at) in log_.items() if now - at > PAIR_HOURS * 3600]:
+                del log_[k]
+
+    def _reserved(self, uid: int) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for per_bookie in self.paper_running.get(uid, {}).values():
+            for b, st in per_bookie.items():
+                out[b] = out.get(b, 0.0) + st
+        return out
+
+    async def _paper_money(self, uid: int, s: UserSettings) -> tuple[paper.Ledger, dict[str, float] | None, float]:
+        """(ledger, money free on each bookie or None, money free in total) - minus what
+        the tests still waiting for their last leg hold."""
+        led = await asyncio.to_thread(bot_ledger, uid, s)
+        held = self._reserved(uid)
+        caps = ({b: led.cash.get(b, 0.0) - held.get(b, 0.0) for b in s.bot_wallets} if s.bot_wallets else None)
+        free = sum(caps.values()) if caps is not None else led.free - sum(held.values())
+        return led, caps, free
 
     async def _paper_user(self, uid: int, s: UserSettings) -> None:
-        """Start tests for the arbs that pass the /bot rules. Each one waits paper.EXEC_DELAY
-        for its last leg, so they run side by side; the stake is reserved right away."""
+        """Start tests for the arbs that pass the /bot rules. Each one waits s.bot_delay
+        for its last leg, so they run side by side; the stakes are reserved right away."""
         seen = self.paper_seen.setdefault(uid, {})
         running = self.paper_running.setdefault(uid, {})
+        view = bot_view(s)
         now = time.time()
         todo = []
-        for a in self.service.arbs_for(s):
-            if arb_key(a) in running or bot_stake_for(a, s) is None:  # /bot rules: kickoff, min %, max stake
+        for a in self.service.arbs_for(view):
+            if arb_key(a) in running or bot_stake_for(a, view) is None:  # /bot rules: kickoff, min %, max stake
                 continue
             prev = seen.get(arb_key(a))
             if prev and prev[1] == _legs_sig(a) and now - prev[0] < paper.RETEST_AFTER:
                 continue  # tested already with these same odds
             todo.append(a)
+        broke = False  # an arb passed the rules but the money wasn't there
         for a in todo[:PAPER_PER_ROUND]:
             if len(running) >= PAPER_MAX_RUNNING:
                 break
-            free = await self._paper_free(uid, s)
+            _, caps, free = await self._paper_money(uid, s)
             if free < paper.MIN_STAKE:  # the whole budget is in play: wait for matches to end
                 if uid not in self.paper_full:
                     self.paper_full.add(uid)
                     await self.bot.send_message(
-                        uid, "💼 Ceo balans je u igri – test čeka da se mečevi završe i novac vrati. "
+                        uid, "💼 Sav novac je u igri – test čeka da se mečevi završe i novac vrati. "
                              "Stanje vidiš u /bot.")
                 break
             self.paper_full.discard(uid)
+            stake = bot_stake_for(a, view, caps) if caps is not None else bot_stake_for(a, replace(
+                view, bot_stake=min(s.bot_stake, free)))
+            if stake is None:
+                broke = True  # e.g. the side this arb needs has run dry
+                continue
             key = arb_key(a)
             seen[key] = (time.time(), _legs_sig(a))
-            running[key] = cap = min(s.bot_stake, free)
-            job = asyncio.create_task(self._paper_test(uid, s, a, cap))
+            running[key] = paper.by_bookie(a.plan(stake, s.currency) or [])
+            job = asyncio.create_task(self._paper_test(uid, s, view, a, stake, caps))
             self.paper_jobs.add(job)
             job.add_done_callback(self.paper_jobs.discard)
+        await self._suggest_move(uid, s, broke)
         local = datetime.now(TZ)
         if local.hour >= PAPER_REPORT_HOUR and self.paper_reported.get(uid) != local.date().isoformat():
             self.paper_reported[uid] = local.date().isoformat()
             await self.bot.send_message(uid, paper_report_for(uid, s))
 
-    async def _paper_test(self, uid: int, s: UserSettings, a: Arb, cap: float) -> None:
+    async def _suggest_move(self, uid: int, s: UserSettings, broke: bool) -> None:
+        """⚖️ once, when one bookie has run low and arbs are being missed for it."""
+        if not s.bot_wallets:
+            return
+        led = await asyncio.to_thread(bot_ledger, uid, s)
+        move = paper.rebalance(led)
+        if move is None:
+            self.paper_moved[uid] = None
+            return
+        if not broke or self.paper_moved.get(uid) == move[:2]:
+            return
+        self.paper_moved[uid] = move[:2]
+        await self.bot.send_message(
+            uid, f"⚖️ <b>Prebaci {money(move[2], '$')} $ sa {move[0]} na {move[1]}</b> – na {move[1]} je ostalo "
+                 f"{money(max(led.cash.get(move[1], 0.0), 0), '$')} $, pa test propušta arbitraže. "
+                 "(Test ne prebacuje sam – kad prebaciš, upiši nove iznose u /bot → 💼.)")
+
+    async def _paper_test(self, uid: int, s: UserSettings, view: UserSettings, a: Arb, stake: float,
+                          caps: dict[str, float] | None) -> None:
         key = arb_key(a)
         try:
-            r = await paper.run_test(self.service, a, s, s.currency, cap)
+            r = await paper.run_test(self.service, a, view, s.currency, stake, caps, s.bot_delay)
             await asyncio.to_thread(paper.save, uid, r)
         except Exception:
             log.exception("paper test %s %s failed", uid, key)
@@ -846,7 +1005,12 @@ class Notifier:
         log.info("paper %s: %s %s %.2f", uid, r.status, r.key, r.profit)
         if r.status in (paper.GONE, paper.NO_FIT):
             return  # nothing would have been bet - only counted in the report
-        r.free, r.settles = await self._paper_free(uid, s), paper.settles_at(r.start)
+        _, caps_now, free = await self._paper_money(uid, s)
+        r.settles = paper.settles_at(r.start)
+        if caps_now is not None:
+            r.wallets = {b: max(v, 0.0) for b, v in caps_now.items()}
+        else:
+            r.free = free
         try:
             await self.bot.send_message(uid, paper_text(r, s.currency))
         except TelegramForbiddenError:
