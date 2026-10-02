@@ -26,7 +26,7 @@ class UserSettings:
     notify_min: float = 1.0  # only push arbs with at least this profit %; the list shows all
     notify_hours: int = 0  # only push arbs whose match starts within this many hours (0 = any time)
     paper: bool = False  # crypto: play arbs on paper (arb.paper) and report how they would have gone
-    # /bot rules for the paper test (its own, not the notification ones)
+    # /bottest rules for the paper test (its own, not the notification ones)
     bot_hours: int = 3  # only matches starting within this many hours (0 = any time)
     bot_min: float = 1.0  # only arbs with at least this profit % (for the stake actually played)
     bot_stake: float = 100  # most one arb gets in total ($); less when the bookies take less
@@ -36,6 +36,16 @@ class UserSettings:
     # money on each bookie ($) - set: the test plays only these bookies, each leg within what's there
     bot_wallets: dict[str, float] = field(default_factory=dict)
     bot_delay: float = 5.0  # s from the first leg to the last (longer if the money has to be sent over first)
+    # /bot: real automatic betting, SX Bet + Polymarket (arb.live)
+    auto: bool = False
+    auto_confirm: bool = True  # ✋ ask before every bet (a button) instead of betting on its own
+    auto_stake: float = 5.0  # most one arb gets in total ($)
+    auto_daily: float = 25.0  # most staked per day ($)
+    auto_open: float = 25.0  # most in bets whose match isn't over yet ($)
+    auto_min: float = 1.0  # min profit %
+    auto_hours: int = 6  # only matches starting within this many hours (0 = any time)
+    poly_funder: str = ""  # address of the Polymarket account (public; the key is in the Credential Manager)
+    poly_sig: int = 1  # 1 = email / Google account, 2 = MetaMask
     list_hours: int = 0  # list only matches starting within this many hours (0 = all)
     list_sort: str = "pct"  # "pct" = best profit first, "time" = soonest first
     # store the switched-OFF ones, so newly added bookies are on by default

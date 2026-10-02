@@ -5,7 +5,8 @@ API key, which the user enters once in the bot (🏦 Kladionice -> 🔑 SX Bet k
 Soccer type 1 markets are binary per outcome: "Team" / "Not team", "Tie" / "Not tie"
 -> 1, X, 2 and their opposites = double chances (Not home = X2, Not tie = 12, ...).
 Type 226 = winner incl. overtime (basketball), 52 = winner (tennis), 2 = total goals.
-Best odds from the taker's side: decimal = 10^20 / percentageOdds."""
+Best odds from the taker's side: decimal = 10^20 / percentageOdds.
+Every outcome also keeps its market hash and side (Event.bet_ref) for automatic betting (arb.live.sxbet)."""
 from __future__ import annotations
 
 import asyncio
@@ -146,6 +147,8 @@ class SXBetScraper(Scraper):
                     ev.add("DC", pair[1], odd2)
                     _limit(ev, ("1X2", pair[0]), size1)
                     _limit(ev, ("DC", pair[1]), size2)
+                    _ref(ev, ("1X2", pair[0]), m, True)
+                    _ref(ev, ("DC", pair[1]), m, False)
                     ev.how[("1X2", pair[0])] = f"„{m.get('outcomeOneName')}“"
                     ev.how[("DC", pair[1])] = f"„{m.get('outcomeTwoName')}“ (na tržištu {one} / {m.get('outcomeTwoName')})"
             elif kind == "total" and m.get("line") is not None:
@@ -153,6 +156,8 @@ class SXBetScraper(Scraper):
                     ev.add_total(m["line"], odd1, odd2)
                     _limit(ev, (f"OU_{line_str(m['line'])}", "O"), size1)
                     _limit(ev, (f"OU_{line_str(m['line'])}", "U"), size2)
+                    _ref(ev, (f"OU_{line_str(m['line'])}", "O"), m, True)
+                    _ref(ev, (f"OU_{line_str(m['line'])}", "U"), m, False)
             elif kind == "spread" and m.get("line") is not None:
                 # "line" belongs to outcome one ("Malta -1.5"), which is team one
                 one = (m.get("outcomeOneName") or "").lower()
@@ -160,16 +165,22 @@ class SXBetScraper(Scraper):
                     ev.add_handicap(m["line"], odd1, odd2)
                     _limit(ev, (f"AH_{line_str(m['line'])}", "1"), size1)
                     _limit(ev, (f"AH_{line_str(m['line'])}", "2"), size2)
+                    _ref(ev, (f"AH_{line_str(m['line'])}", "1"), m, True)
+                    _ref(ev, (f"AH_{line_str(m['line'])}", "2"), m, False)
                 elif one.startswith(away.lower()) and clean_line(m["line"]):
                     ev.add_handicap(-float(m["line"]), odd2, odd1)
                     _limit(ev, (f"AH_{line_str(-float(m['line']))}", "1"), size2)
                     _limit(ev, (f"AH_{line_str(-float(m['line']))}", "2"), size1)
+                    _ref(ev, (f"AH_{line_str(-float(m['line']))}", "1"), m, False)
+                    _ref(ev, (f"AH_{line_str(-float(m['line']))}", "2"), m, True)
             elif kind == "winner":
                 market = "12_OT" if sport in ("basketball", "american_football") else "12"
                 ev.add(market, "1", odd1)
                 ev.add(market, "2", odd2)
                 _limit(ev, (market, "1"), size1)
                 _limit(ev, (market, "2"), size2)
+                _ref(ev, (market, "1"), m, True)
+                _ref(ev, (market, "2"), m, False)
         return [ev for ev in events.values() if ev.markets]
 
     async def close(self) -> None:
@@ -207,3 +218,10 @@ def _size(level: dict | None) -> float | None:
 def _limit(ev: Event, key: tuple[str, str], size: float | None) -> None:
     if size is not None and key[0] in ev.markets and key[1] in ev.markets[key[0]]:
         ev.limits[key] = size
+
+
+def _ref(ev: Event, key: tuple[str, str], m: dict, one: bool) -> None:
+    """What a bet on this outcome sends to SX (automatic betting, arb.live.sxbet): the market and
+    whether it backs outcome one (True) or outcome two (False) of it."""
+    if key[0] in ev.markets and key[1] in ev.markets[key[0]]:
+        ev.bet_ref[key] = {"market": m["marketHash"], "one": one, "event": m["sportXeventId"]}

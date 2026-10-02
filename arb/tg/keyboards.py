@@ -13,18 +13,22 @@ BTN_ARBS = "🔍 Arbitraže"
 BTN_BUDGET = "💰 Ulog"
 BTN_BOOKIES = "🏦 Kladionice"
 BTN_STATUS = "📊 Status"
+BTN_AUTO = "🤖 Bot (SX + Polymarket)"
 
 BUDGETS = {"din": [10_000, 20_000, 50_000, 100_000, 200_000, 500_000],
            "$": [25, 50, 100, 250, 500, 1_000]}
 
 
 def main_menu(s: UserSettings) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
+        [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
+        [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
+    ]
+    if s.mode == "crypto":  # real automatic betting SX Bet + Polymarket (/bot)
+        rows.append([KeyboardButton(text=BTN_AUTO)])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
-            [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
-            [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
-        ],
+        keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Upiši koliko ulažeš, npr. " + ("100" if s.currency == "$" else "50000"),
@@ -90,7 +94,7 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-# /bot: the rules of the paper test (arb.paper)
+# /bottest: the rules of the paper test (arb.paper)
 BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
 BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
 BOT_STAKES = [10, 25, 50, 100, 250]
@@ -137,7 +141,7 @@ def wallets_kb(s: UserSettings) -> InlineKeyboardMarkup:
     for name in names:
         have = s.bot_wallets.get(name)
         b.button(text=f"✅ {name}: {money(have, '$')} $" if have else f"⬜ {name}", callback_data=f"bw:{name}")
-    b.button(text="⬅️ Nazad na /bot", callback_data="bt:back")
+    b.button(text="⬅️ Nazad na /bottest", callback_data="bt:back")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), 1)
     return b.as_markup()
 
@@ -192,7 +196,8 @@ def bookies_kb(s: UserSettings) -> InlineKeyboardMarkup:
     if s.mode == "crypto":
         has_key = bool(secrets.get("sxbet_api_key"))
         b.button(text="🔑 SX Bet ključ ✅ (promeni)" if has_key else "🔑 Unesi SX Bet API ključ", callback_data="set:sxkey:")
-        extra = 2
+        b.button(text="🤖 Automatsko klađenje SX Bet + Polymarket (/bot)", callback_data="au:back")
+        extra = 3
     switch = "🇷🇸 Prebaci na srpske kladionice" if s.mode == "crypto" else "🪙 Prebaci na kripto"
     b.button(text=switch, callback_data="set:mode:")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), *([1] * extra))

@@ -68,13 +68,22 @@ Ostalo:
 - `🏦 Kladionice`: koje kladionice pratiš (uključi samo one gde imaš nalog); dugme `🪙 Prebaci na kripto` prebacuje na kripto kladionice (Stake, 1xBit, BC.Game, BetFury, Rainbet, Betpanda, Betplay, Golden Panda, Wild.io, Sportsbet.io, CasinOK, Thrill, Cloudbet, Dexsport, Duelbits, Shuffle, Vave, Flush, Polymarket, SX Bet); ulog u $ ide i na pola dolara (npr. 10.5) sa ulogom u $, i nazad
 - `📋 Lista arbitraža` ili `/arbitraze`: **sve** arbitraže u jednoj poruci, po 10 na strani (◀️ ▶️). Filter **Sve / 24h / 6h / 3h** (samo mečevi koji počinju u tom roku) i sortiranje **po profitu ili po vremenu**; izbor se pamti. Poruka se sama osvežava posle svakog scana (12 h ili dok ne klikneš ⏸). Broj otvara detalje sa ulozima i linkovima.
 - `🔔 Obaveštenja`: uključi ili isključi i postavi minimalni % (npr. 1.5%). Posebnom porukom stižu samo arbitraže iznad tog procenta, a lista i dalje prikazuje sve.
-- `/bot`: 🧪 **test na papiru** (samo kripto), sa svojim pravilima, odvojenim od obaveštenja:
+- `/bot` (ili dugme `🤖 Bot (SX + Polymarket)` u kripto režimu): 🤖 **automatsko klađenje SX Bet + Polymarket**, preko njihovih zvaničnih API-ja. Panel vodi kroz podešavanje redom:
+  1. 🪙 kripto režim, 2. 🔑 SX Bet API ključ, 3. 🔵 SX Bet novčanik (privatni ključ – njime se potpisuju nalozi), 4. 🟣 Polymarket nalog (adresa + privatni ključ, tip naloga email/Google ili MetaMask), 5. USDC na obe berze, 6. 🤖 uključi.
+  - Ključevi idu u Windows Credential Manager (`keyring`), nikad u fajl; poruka sa ključem se odmah briše iz chata. Preporuka: poseban novčanik samo za bota, sa samo onoliko novca koliko je za klađenje.
+  - ⚙️ Pravila: najviše $ po arbitraži, dnevno i u otvorenim tiketima, najmanji profit %, rok početka meča. ✋ „Pitaj pre uplate“ je uključeno dok ga ne isključiš (dugme ✅ Uplati važi 90 s, kvote se tad proveravaju ponovo).
+  - Redosled: kvote se ponovo pročitaju sa obe berze, pa **prvo SX Bet** nalog „fill-or-kill“ po planiranoj kvoti ili boljoj (ako ne prođe, ništa nije uplaćeno), pa **Polymarket** FOK po ceni na kojoj je cela arbitraža najgore na nuli, za iznos koji je SX stvarno primio. Ako Polymarket ne prođe ni posle 3 pokušaja, pokriva uz gubitak do 5 %; ako ni to, stiže 🚨 poruka sa 🛟 Pokrij.
+  - Pre svake uplate proverava da li Polymarket dozvoljava tvoju zemlju (njihov geoblock) – ako ne, ništa ne uplaćuje. Bot ne ide preko VPN-a niti zaobilazi ograničenja berzi.
+  - 📈 **Procena**: posle svakog skeniranja beleži svaku SX Bet + Polymarket arbitražu (`data/live.db`) i pokazuje koliko ih ima dnevno, tipičan %, koliko primaju i koliko bi to bilo $ i % dnevno na tvoj kapital – gornja granica, kao da je svaka uhvaćena.
+  - 🔍 Proba bez uplate: ceo put na najboljoj arbitraži (oba naloga se naprave i potpišu), ništa se ne šalje. 📒 Tiketi, 📊 Izveštaj (i uveče), 🛑 STOP.
+  - Ishod se čita sa Polymarket-a kad se tržište razreši; ako ne može, bot pita ko je dobio. Dobitak na Polymarket-u se preuzima na sajtu (Claim).
+- `/bottest`: 🧪 **test na papiru** (samo kripto), sa svojim pravilima, odvojenim od obaveštenja:
   - ⏰ meč počinje u narednih N sati (1 / 3 / 6 / 12 / 24 h, bilo kad ili upišeš svoje)
   - 📈 najmanji profit u %
   - 💵 najveći ulog po arbitraži u $; manje ako kladionica ili Polymarket ponuda ne prima toliko (najmanje 5 $)
   - ⏱ koliko posle prve noge ide druga: 5 s (novac je već na obe kladionice) do 5 min (novac se prvo šalje, npr. preko Solane)
-  - 💼 **novac po kladionicama**: upišeš koliko imaš na kojoj (npr. 1xBit 25 $, Polymarket 25 $). Test igra samo arbitraže između tih kladionica, a bot sam računa podelu: nijedna strana ne dobija više nego što tamo ima (podela 70/30 sa 25 $ + 25 $ → oko 25 $ + 10,7 $). Bez toga se koristi jedan zajednički budžet.
-  - ulog je „u igri“ dok se meč ne završi (računa se 3 h posle početka); tada se ulog i zarada vraćaju na kladionicu na kojoj je opklada prošla (test ne zna pravi ishod, pa ga izvlači po kvotama). `/bot` pokazuje balans, novac na svakoj kladionici, šta je u igri i koliko zarade čeka; ⚖️ predloži prebacivanje kad jedna strana ostane bez novca
+  - 💼 **novac po kladionicama**: upišeš koliko imaš na kojoj (npr. 1xBit 25 $, Polymarket 25 $). Test igra samo arbitraže između tih kladionica, a bot sam računa podelu: nijedna strana ne dobija više nego što tamo ima (podela 70/30 sa 25 $ + 25 $ → oko 25 $ + 10,7 $). Bez toga se koristi jedan zajednički budžet. Sa novcem upisanim samo na SX Bet + Polymarket test pokazuje koliko bi od tih arbitraža stvarno prošlo.
+  - ulog je „u igri“ dok se meč ne završi (računa se 3 h posle početka); tada se ulog i zarada vraćaju na kladionicu na kojoj je opklada prošla (test ne zna pravi ishod, pa ga izvlači po kvotama). `/bottest` pokazuje balans, novac na svakoj kladionici, šta je u igri i koliko zarade čeka; ⚖️ predloži prebacivanje kad jedna strana ostane bez novca
   - 📊 **Parovi kladionica**: koji parovi su najčešći u arbitražama koje prolaze tvoja pravila (poslednja 24 h), da znaš gde da staviš novac
   - 🔄 Kreni ispočetka: balans opet kreće od upisanog novca
 
@@ -97,7 +106,8 @@ arb/scrapers/        po jedan scraper za svaku kladionicu
 arb/matcher.py       uparivanje mečeva između kladionica
 arb/arbitrage.py     traženje arbitraža + raspodela uloga
 arb/scanner.py       pokreće sve scrapere paralelno
-arb/tg/              Telegram bot (meni, dugmići, obaveštenja, podešavanja)
+arb/live/            pravo klađenje SX Bet + Polymarket (nalozi, redosled, knjiga tiketa, procena)
+arb/tg/              Telegram bot (meni, dugmići, obaveštenja, podešavanja; /bot je arb/tg/auto.py)
 bot.py               pokretanje bota
 scan.py              CLI za ručni scan
 ```
@@ -105,6 +115,10 @@ scan.py              CLI za ručni scan
 ## Brzina
 
 Scan svih kladionica traje oko 15 s. Uparivanje mečeva koristi indeks po sportu i vremenu početka (a ne poređenje svih parova), pa traje manje od 1 s. Sav teški posao ide u poseban thread, a dugmići u botu uvek odmah koriste poslednji rezultat i ne čekaju scan. Log je u `data/bot.log`.
+
+## Testovi
+
+`python test_live.py`: automatsko klađenje bez interneta, sa lažnim berzama – SX Bet nalog (lestvica kvota, EIP-712 potpis, odgovori), redosled nogu i svaki kraj (obe uplaćene, SX odbio, SX delimično, Polymarket promašio → pokrivanje / 🚨, SX bez odgovora), geoblock, proba, zatvaranje posle meča i 📈 procena.
 
 ## Test pre restarta
 
