@@ -79,6 +79,7 @@ Ostalo:
   - 🔄 Kreni ispočetka: balans opet kreće od upisanog novca
 
   Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle izabranog vremena ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno, a ulog se odmah rezerviše. Mečevi koji počinju pre druge uplate se preskaču. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
+- `🤖 Auto` (dugme u kripto režimu, `/auto`, ili 🏦 Kladionice → 🤖 Nalozi): **prave uplate, 1xBit + Polymarket** – vidi ispod.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.
 - `📊 Status`: da li sve kladionice rade i koliko je mečeva upareno
 
@@ -89,6 +90,26 @@ Podešavanja korisnika se čuvaju u `data/users.json`.
 Mozzart koristi Microsoft Edge koji već postoji na Windowsu. Ako Edge nije dostupan:
 `playwright install chromium`, pa `set MOZZART_BROWSER=chromium`.
 
+## 🤖 Automatsko klađenje (1xBit + Polymarket, pravim novcem)
+
+Kod je u `arb/live/`, dugmići u `arb/tg/auto.py`. Igra samo arbitraže sa tačno dve noge: jedna na 1xBit-u, jedna na Polymarket-u.
+
+**Podešavanje (jednom):**
+1. 🟣 **Poveži Polymarket**: tip naloga (email/Google = 1, MetaMask = 2) → adresa naloga (0x…) → privatni ključ. Poruka sa ključem se odmah briše, ključ ide u **Windows Credential Manager** (biblioteka `keyring`), nikad u fajl. Bot koristi zvanični API (`py-clob-client`).
+2. 🔵 **1xBit prijava**: bot otvori pravi Edge prozor (svoj profil u `data/1xbit_profile`), u njemu se uloguješ ručno. Lozinku bot ne vidi. Prozor ostaje otvoren (može minimizovan).
+3. 🎓 **Nauči 1xBit uplatu**: u tom prozoru prvo podesi „ne prihvataj promene kvota“, pa ručno uplati JEDAN mali pre-match tiket. Bot zapamti zahtev koji sajt pošalje (u Credential Manager) i posle šalje isti, samo sa drugim mečem, kvotom i ulogom. 1xBit nema javni API – ovo je jedini način; nalog mora biti u USDT.
+4. ✏️ **1xBit balans**: upišeš koliko imaš; posle ga bot sam prati (− ulog, + dobitak). Polymarket balans čita preko API-ja.
+5. 🔍 **Proba bez uplate**: prođe ceo put na trenutnoj arbitraži, ali ništa ne pošalje.
+
+**Kako igra:** posle svakog skeniranja, za arbitraže koje prolaze ⚙️ pravila: proveri 🛑, geoblock (`polymarket.com/api/geoblock`), dnevni limit, otvorenu izloženost i novac na obe strane → ponovo pročita kvote → **prvo 1xBit** (ako odbije, ništa nije izgubljeno) → **pa Polymarket FOK** („sve ili ništa“) po najgoroj ceni na kojoj je cela arbitraža na nuli (sa Polymarket naknadom), 3 pokušaja. Ako ni tad ne ide, pokrije uz gubitak do 5 %; ako ni to, odmah javlja 🚨 sa dugmetom 🛟 Pokrij.
+- ✋ **Pitaj pre uplate** (uključeno na početku): za svaku arbitražu stiže dugme ✅ Uplati (važi 90 s). Kad se uveriš da radi, isključi ga i bot uplaćuje sam.
+- ⚙️ **Pravila**: max $ po arbitraži (početno 5), dnevni limit (25), max u otvorenim tiketima (25), min profit (1 %), rok početka meča (6 h).
+- 🛑 **STOP**: zaustavlja sve odmah; već uplaćeni tiketi ostaju.
+- 📒 **Tiketi** (`data/live.db`): svaka uplata, kvota, ID naloga/tiketa, ishod. Posle meča bot čita ishod sa Polymarket-a i zatvara tiket sam; ako ne može, pita te ko je dobio. Uveče stiže izveštaj, 📊 Izveštaj ga daje odmah.
+- Polymarket dobitak se preuzima na sajtu (Claim) – bot to ne radi.
+
+Test bez interneta: `python test_live.py` (lažne kladionice, prava logika, knjiga i dugmići).
+
 ## Struktura
 
 ```
@@ -97,6 +118,8 @@ arb/scrapers/        po jedan scraper za svaku kladionicu
 arb/matcher.py       uparivanje mečeva između kladionica
 arb/arbitrage.py     traženje arbitraža + raspodela uloga
 arb/scanner.py       pokreće sve scrapere paralelno
+arb/paper.py         test na papiru (/bot)
+arb/live/            prave uplate: Polymarket API, 1xBit preko prozora, knjiga tiketa, automatski igrač
 arb/tg/              Telegram bot (meni, dugmići, obaveštenja, podešavanja)
 bot.py               pokretanje bota
 scan.py              CLI za ručni scan

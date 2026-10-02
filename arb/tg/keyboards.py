@@ -13,18 +13,22 @@ BTN_ARBS = "🔍 Arbitraže"
 BTN_BUDGET = "💰 Ulog"
 BTN_BOOKIES = "🏦 Kladionice"
 BTN_STATUS = "📊 Status"
+BTN_AUTO = "🤖 Auto"
 
 BUDGETS = {"din": [10_000, 20_000, 50_000, 100_000, 200_000, 500_000],
            "$": [25, 50, 100, 250, 500, 1_000]}
 
 
 def main_menu(s: UserSettings) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
+        [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
+        [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
+    ]
+    if s.mode == "crypto":  # real automatic betting: accounts, balances, tickets
+        rows.append([KeyboardButton(text=BTN_AUTO)])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
-            [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
-            [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
-        ],
+        keyboard=rows,
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Upiši koliko ulažeš, npr. " + ("100" if s.currency == "$" else "50000"),
@@ -192,7 +196,8 @@ def bookies_kb(s: UserSettings) -> InlineKeyboardMarkup:
     if s.mode == "crypto":
         has_key = bool(secrets.get("sxbet_api_key"))
         b.button(text="🔑 SX Bet ključ ✅ (promeni)" if has_key else "🔑 Unesi SX Bet API ključ", callback_data="set:sxkey:")
-        extra = 2
+        b.button(text="🤖 Nalozi, balans i automatsko klađenje", callback_data="au:back")
+        extra = 3
     switch = "🇷🇸 Prebaci na srpske kladionice" if s.mode == "crypto" else "🪙 Prebaci na kripto"
     b.button(text=switch, callback_data="set:mode:")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), *([1] * extra))

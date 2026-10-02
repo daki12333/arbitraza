@@ -70,6 +70,7 @@ class Scanner:
                 for ev in events:
                     ev.__dict__.setdefault("depth", {})  # saved by an older version
                     ev.__dict__.setdefault("reversed", False)
+                    ev.__dict__.setdefault("bet_ref", {})
                 self._last[name] = (at, BookieResult(events, 0.0))
 
     def _save_cache(self) -> None:

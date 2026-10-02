@@ -3,3 +3,5 @@ playwright>=1.45
 rapidfuzz>=3.9
 python-dotenv>=1.0
 aiogram>=3.13
+py-clob-client>=0.34
+keyring>=25

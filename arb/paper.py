@@ -111,11 +111,11 @@ def by_bookie(rows) -> dict[str, float]:
 
 
 def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
-              caps: dict[str, float] | None = None) -> float | None:
+              caps: dict[str, float] | None = None, min_stake: float = MIN_STAKE) -> float | None:
     """The biggest total up to `max_stake` that this arb takes: the full amount if every leg
     fits, otherwise less (a bookie limit / thin Polymarket book). With `caps` (money on each
     bookie) no bookie's legs may need more than it has: if the split is 70/30 and each side
-    has 25 $, the total is ~35 $, not 50 $. None = not even MIN_STAKE."""
+    has 25 $, the total is ~35 $, not 50 $. None = not even `min_stake`."""
     stake = max_stake
     if caps is not None:  # start where the tightest bookie runs out
         need: dict[str, float] = {}
@@ -123,7 +123,7 @@ def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
             need[leg.bookie] = need.get(leg.bookie, 0.0) + st
         ratio = min((caps.get(b, 0.0) / st for b, st in need.items() if st > 0), default=1.0)
         stake = math.floor(max_stake * min(ratio, 1.0) * 2) / 2
-    while stake >= MIN_STAKE - 1e-9:
+    while stake >= min_stake - 1e-9:
         rows = arb.plan(stake, currency)
         if rows and (caps is None or all(st <= caps.get(b, 0.0) + 1e-9 for b, st in by_bookie(rows).items())):
             over = sum(st for _, st, _ in rows) - max_stake
@@ -131,7 +131,8 @@ def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
                 return stake
             stake -= math.ceil(over * 2) / 2  # rounded stakes went above the max: just that much lower
             continue
-        stake = round(stake * 0.9 * 2) / 2  # 100 -> 90 -> 81 ... on half-dollars
+        # 100 -> 90 -> 81 ... on half-dollars (small stakes on dimes, and always at least one step down)
+        stake = min(round(stake * 0.9 * 2) / 2 if stake >= 20 else round(stake * 0.9, 1), round(stake - 0.1, 1))
     return None
 
 

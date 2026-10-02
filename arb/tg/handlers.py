@@ -879,8 +879,11 @@ class Notifier:
         self.paper_running: dict[int, dict[str, dict[str, float]]] = {}
         self.paper_moved: dict[int, tuple | None] = {}  # uid -> the last "⚖️ prebaci" suggestion sent
         self.paper_jobs: set[asyncio.Task] = set()
+        self.trader = None  # arb.live.engine.AutoTrader (set in bot.py): real bets after every scan
 
     async def __call__(self) -> None:
+        if self.trader is not None:  # first: real bets want the freshest odds
+            self.trader.on_scan(allowed)
         await self.update_lists()
         await self.notify_new()
         self.log_pairs()

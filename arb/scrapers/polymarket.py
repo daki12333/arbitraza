@@ -242,12 +242,18 @@ class PolymarketScraper(Scraper):
             url=f"https://polymarket.com/event/{e.get('slug')}",
         )
         links = []
+        refs: dict[tuple[str, str], dict] = {}
 
         def link(key: str, oc: str, m: dict, idx: int) -> None:
-            """Remember which outcome token is bought for (key, oc) - for its order book."""
+            """Remember which outcome token is bought for (key, oc) - for its order book
+            and for automatic betting (Event.bet_ref)."""
             toks = _floats(m.get("clobTokenIds"))
             if len(toks) == 2:
                 links.append((key, oc, str(toks[idx]), _rate(m)))
+                refs[(key, oc)] = {"token": str(toks[idx]), "condition": m.get("conditionId") or "",
+                                   "rate": _rate(m), "neg_risk": bool(m.get("negRisk")),
+                                   "tick": str(m.get("orderPriceMinTickSize") or "0.01"),
+                                   "question": m.get("question") or ""}
 
         def is_home(name: str) -> bool | None:
             n = name.strip().lower()
@@ -368,6 +374,7 @@ class PolymarketScraper(Scraper):
         if not ev.markets:
             return None
         links_out += [(ev, key, oc, tok, rate) for key, oc, tok, rate in links if oc in ev.markets.get(key, {})]
+        ev.bet_ref = {k: r for k, r in refs.items() if k[1] in ev.markets.get(k[0], {})}
         return ev
 
     async def close(self) -> None:

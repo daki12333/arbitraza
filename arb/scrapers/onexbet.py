@@ -142,28 +142,35 @@ class OneXBetScraper(Scraper):
             if e.get("B"):  # blocked ("locked" on the site) - can't be bet
                 continue
             grp, typ, odd, line = e.get("G"), e.get("T"), e.get("C"), e.get("P")
+
+            def put(market: str, outcome: str) -> None:
+                ev.add(market, outcome, odd)
+                if outcome in ev.markets.get(market, {}):
+                    # what a bet slip on the site sends for it (automatic betting, arb.live.onexbit)
+                    ev.bet_ref[(market, outcome)] = {"GameId": g["I"], "Type": typ, "Param": line or 0, "Group": grp}
+
             if grp == 1 and sport in ("football", "hockey", "handball") and typ in (1, 2, 3):
-                ev.add("1X2", {1: "1", 2: "X", 3: "2"}[typ], odd)
+                put("1X2", {1: "1", 2: "X", 3: "2"}[typ])
             elif grp == 8 and sport in ("football", "hockey") and typ in (4, 5, 6):
-                ev.add("DC", {4: "1X", 5: "12", 6: "X2"}[typ], odd)
+                put("DC", {4: "1X", 5: "12", 6: "X2"}[typ])
             elif grp == 1 and sport in ("tennis", "volleyball", "table_tennis", "baseball", "cs2", "dota2", "lol",
                                         "valorant") and typ in (1, 3):
-                ev.add("12", "1" if typ == 1 else "2", odd)
+                put("12", "1" if typ == 1 else "2")
             elif grp == 101 and sport in ("basketball", "american_football") and typ in (401, 402):
-                ev.add("12_OT", "1" if typ == 401 else "2", odd)
+                put("12_OT", "1" if typ == 401 else "2")
             elif grp == 17 and typ in (9, 10) and (
                     (sport == "football" and line in OU_LINES)
                     or (self.crypto and sport in ("football", "basketball", "tennis", "handball", "baseball",
                                                   "american_football"))):
                 if clean_line(line):
-                    ev.add(f"OU_{line_str(line)}", "O" if typ == 9 else "U", odd)
+                    put(f"OU_{line_str(line)}", "O" if typ == 9 else "U")
             elif grp == 2 and typ in (7, 8) and self.crypto and line is not None and sport in (
                     "football", "basketball", "tennis", "handball", "baseball", "american_football"):
                 home_line = line if typ == 7 else -line  # P = that side's own handicap
                 if clean_line(home_line):
-                    ev.add(f"AH_{line_str(home_line)}", "1" if typ == 7 else "2", odd)
+                    put(f"AH_{line_str(home_line)}", "1" if typ == 7 else "2")
             elif grp == 19 and sport == "football" and typ in (180, 181):
-                ev.add("BTTS", "GG" if typ == 180 else "NG", odd)
+                put("BTTS", "GG" if typ == 180 else "NG")
         return ev if ev.markets else None
 
     async def close(self) -> None:
