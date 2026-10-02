@@ -120,7 +120,8 @@ def auto_kb(s: UserSettings, trader: AutoTrader) -> InlineKeyboardMarkup:
     b.button(text="📊 Izveštaj", callback_data="au:report")
     b.button(text="🔍 Proba bez uplate", callback_data="au:dry")
     b.button(text="🛑 STOP – zaustavi sve", callback_data="au:stop")
-    b.adjust(1, 1, 3, 1, 1, 3, 1, 1)
+    b.button(text="📒 Tiketi i balans – sve kladionice (igraš ti, bot prati)", callback_data="tr:new")
+    b.adjust(1, 1, 3, 1, 1, 3, 1, 1, 1)
     return b.as_markup()
 
 

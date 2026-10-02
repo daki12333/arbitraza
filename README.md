@@ -88,6 +88,12 @@ Ostalo:
   - 🔄 Kreni ispočetka: balans opet kreće od upisanog novca
 
   Bot „igra“ svaku arbitražu koja prolazi pravila, ali **ništa ne uplaćuje**. Proveri kvote uživo, „uplati“ prvu nogu, posle izabranog vremena ponovo proveri poslednju i javi da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno, a ulog se odmah rezerviše. Mečevi koji počinju pre druge uplate se preskaču. Uveče stiže izveštaj, a 📊 Izveštaj ga prikazuje odmah. Rezultati se čuvaju u `data/paper.db`.
+- `📒 Tiketi i balans` (dugme u meniju, `/tiketi` ili `/balans`): **praćenje onoga što igraš sam, na svim kladionicama**. Bot ništa ne uplaćuje i ne loguje se nigde – ti upišeš šta si uradio, on vodi računicu:
+  - 💰 **balans po kladionici** (slobodno + u igri), ukupno u din i u $. ➕ Uplata, ➖ Isplata, 🔁 **Prebaci** sa jedne kladionice na drugu (upišeš poslato i stiglo, razlika je naknada), ✏️ **Ispravi** kad kladionica pokazuje drugi iznos. Polymarket i SX Bet: ako su povezani u `/bot`, pored balansa piše i stanje sa njihovog API-ja, a 🔗 ga upisuje.
+  - ✍️ **Odigrao sam – prati tiket** ispod svake arbitraže: tiket se popuni ulozima i kvotama kako ih vidiš; ako si uplatio drugačije, klikni nogu i upiši ulog i kvotu (npr. `5000 2.05`), pa ✅ Sačuvaj – ulozi se skidaju sa balansa. ✍️ **Ručni tiket** za sve ostalo: prvi red meč (i vreme), pa po red `kladionica ishod kvota ulog`.
+  - ⏰ 3 h posle početka meča bot pita **ko je prošao**: ✅ Prošao: <kladionica> (ostale noge su pale), ili ✏️ Drugo – po nozi ✅ / ❌ / ↩️ vraćen ulog / 🌗 pola prošlo / 🌘 pola palo. Dobitak ide na balans te kladionice. ↩️ Poništi rezultat i 🗑 Obriši ako je nešto pogrešno upisano.
+  - 📊 **Statistika** (7 / 30 dana / sve): broj tiketa, promet, profit, ROI, planirano naspram stvarnog, po kladionici i po parovima kladionica. 🧾 Istorija novca: svaka promena.
+  - Sve je u `data/tracker.db`.
 - Detalji arbitraže prikazuju profit za svaki ishod ("ako prođe X") i minimalnu i maksimalnu zaradu.
 - `📊 Status`: da li sve kladionice rade i koliko je mečeva upareno
 
@@ -107,7 +113,8 @@ arb/matcher.py       uparivanje mečeva između kladionica
 arb/arbitrage.py     traženje arbitraža + raspodela uloga
 arb/scanner.py       pokreće sve scrapere paralelno
 arb/live/            pravo klađenje SX Bet + Polymarket (nalozi, redosled, knjiga tiketa, procena)
-arb/tg/              Telegram bot (meni, dugmići, obaveštenja, podešavanja; /bot je arb/tg/auto.py)
+arb/track.py         📒 tiketi i novac koje igraš sam (data/tracker.db)
+arb/tg/              Telegram bot (meni, dugmići, obaveštenja, podešavanja; /bot je arb/tg/auto.py, /tiketi arb/tg/tracker.py)
 bot.py               pokretanje bota
 scan.py              CLI za ručni scan
 ```
@@ -119,6 +126,8 @@ Scan svih kladionica traje oko 15 s. Uparivanje mečeva koristi indeks po sportu
 ## Testovi
 
 `python test_live.py`: automatsko klađenje bez interneta, sa lažnim berzama – SX Bet nalog (lestvica kvota, EIP-712 potpis, odgovori), redosled nogu i svaki kraj (obe uplaćene, SX odbio, SX delimično, Polymarket promašio → pokrivanje / 🚨, SX bez odgovora), geoblock, proba, zatvaranje posle meča i 📈 procena.
+
+`python test_tracker.py`: 📒 tiketi i balans bez interneta – uplate, prebacivanje sa naknadom, ispravka, tiket sa arbitraže (izmena noge, čuvanje, podsetnik posle meča, ✅ prošao), ručni tiket, povraćaj / pola, poništavanje, statistika.
 
 ## Test pre restarta
 

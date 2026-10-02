@@ -13,7 +13,7 @@ from aiogram.types import BotCommand
 
 from arb.config import ALLOWED_USERS, DATA_DIR, SCAN_INTERVAL, TELEGRAM_TOKEN
 from arb.live.engine import AutoTrader
-from arb.tg import auto
+from arb.tg import auto, tracker
 from arb.tg.formatting import TZ
 from arb.tg.handlers import Notifier, allowed, denied, router
 from arb.tg.service import ArbService
@@ -42,9 +42,10 @@ async def main() -> None:
     service.regions = lambda: {s.mode for uid, s in store.users.items() if allowed(uid)}
 
     dp = Dispatcher(service=service, store=store, trader=trader)
-    dp.include_routers(auto.router, router, denied)
+    dp.include_routers(auto.router, tracker.router, router, denied)
     await bot.set_my_commands([
         BotCommand(command="arbitraze", description="Lista svih arbitraža (osvežava se sama)"),
+        BotCommand(command="tiketi", description="📒 Tiketi i balans – prati šta igraš (sve kladionice)"),
         BotCommand(command="bot", description="Automatsko klađenje SX Bet + Polymarket (podešavanje)"),
         BotCommand(command="bottest", description="Test na papiru (rok, min %, max ulog)"),
         BotCommand(command="start", description="Glavni meni"),
@@ -53,10 +54,12 @@ async def main() -> None:
     me = await bot.get_me()
     log.info("Bot @%s pokrenut, scan na svakih %ds", me.username, SCAN_INTERVAL)
     scan_task = asyncio.create_task(service.loop())
+    remind_task = asyncio.create_task(tracker.remind_loop(bot))  # 📒 "ko je prošao?" after each match
     try:
         await dp.start_polling(bot)
     finally:
         scan_task.cancel()
+        remind_task.cancel()
         await trader.close()
         await service.close()
         await bot.session.close()
