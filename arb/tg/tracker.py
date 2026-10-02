@@ -1,4 +1,5 @@
-"""📒 Tiketi i balans (/tiketi, the 📒 menu button): the user plays by hand on any bookie, the bot
+"""📒 Tiketi i balans (/tiketi, the 📒 menu button, 🪙 crypto mode only): the user plays by hand on any
+crypto bookie, the bot
 only keeps track - money on every bookie, tickets in play, results, stats. Nothing is placed.
 
 A ticket comes from "✍️ Odigrao sam" under an arb (stakes and odds as shown, editable before saving)
@@ -54,7 +55,7 @@ MONEY_ASK = {"dep": "➕ Koliko si uplatio na <b>{b}</b>? Upiši iznos ({c}), np
 MANUAL_HELP = (
     "✍️ <b>Ručni tiket</b>: upiši u jednoj poruci, prvi red je meč (a na kraju vreme početka, ako ga znaš), "
     "pa po red za svaku uplatu: <b>kladionica · ishod · kvota · ulog</b>\n\n"
-    "<code>Real – Barcelona 20:45\nMozzart 1 2.10 5000\nMeridian X2 1.95 5200</code>\n\n"
+    "<code>Real – Barcelona 20:45\n1xBit 1 2.10 50\nPolymarket X2 1.95 52</code>\n\n"
     "Ishod piši kako hoćeš (<code>1</code>, <code>X2</code>, <code>više 2.5</code>…). Vreme može i sa datumom: "
     "<code>03.10. 20:45</code>. Bez vremena bot pita za rezultat posle 3 h.")
 
@@ -146,10 +147,14 @@ def draft_from_arb(arb, key: str, budget: float, currency: str) -> Draft:
                  market=market_label(arb.market, ev.sport, ev.home, ev.away), arb_key=key)
 
 
+CRYPTO_BOOKIES = [b for b in ALL_BOOKIES if BOOKIE_REGION[b] == "crypto"]
+ONLY_CRYPTO = "📒 Tiketi i balans rade samo u 🪙 kripto režimu (🏦 Kladionice → 🪙 Prebaci na kripto)."
+
+
 def match_bookie(line: str) -> tuple[str, str] | None:
-    """("Mozzart", rest of the line) - the longest bookie name the line starts with."""
+    """("Stake", rest of the line) - the longest crypto bookie name the line starts with."""
     low = line.lower()
-    for name in sorted(ALL_BOOKIES, key=len, reverse=True):
+    for name in sorted(CRYPTO_BOOKIES, key=len, reverse=True):
         if low.startswith(name.lower()):
             return name, line[len(name):]
     return None
@@ -186,7 +191,7 @@ def parse_manual(text: str) -> tuple[Draft | None, str]:
     for line in lines[1:]:
         hit = match_bookie(line)
         if not hit:
-            return None, f"Ne znam kladionicu u redu „{html.escape(line)}“. Piši je kao u 🏦 Kladionice (npr. Mozzart, 1xBit, Polymarket)."
+            return None, f"Ne znam kripto kladionicu u redu „{html.escape(line)}“. Piši je kao u 🏦 Kladionice (npr. 1xBit, Stake, Polymarket)."
         bookie, rest = hit
         parts = rest.split()
         if len(parts) < 3:
@@ -196,10 +201,7 @@ def parse_manual(text: str) -> tuple[Draft | None, str]:
             return None, f"U redu „{html.escape(line)}“ ne razumem kvotu ili ulog (kvota pa ulog, npr. <code>2.10 5000</code>)."
         outcome = " ".join(parts[:-2])
         legs.append({"bookie": bookie, "outcome": outcome, "label": html.escape(outcome), "odd": odd, "stake": stake})
-    currencies = {cur_of(l["bookie"]) for l in legs}
-    if len(currencies) > 1:
-        return None, "Jedan tiket ne može da meša dinare i $ (srpske i kripto kladionice) – unesi ih posebno."
-    return Draft(name=html.escape(name) or "Tiket", currency=currencies.pop(), legs=legs,
+    return Draft(name=html.escape(name) or "Tiket", currency="$", legs=legs,
                  start=start or time.time()), ""
 
 
@@ -452,7 +454,7 @@ def history_text(uid: int) -> str:
 def bookie_names(uid: int, s: UserSettings, skip: str = "") -> list[str]:
     """The user's bookies first (with money or in play), then the rest of the current mode's."""
     have = set(book.balances(uid)) | set(book.in_play(uid))
-    mine = [b for b in ALL_BOOKIES if b in have]
+    mine = [b for b in CRYPTO_BOOKIES if b in have]
     rest = [b for b in s.bookies if b not in have]
     if skip:  # 🔁 the second bookie: same currency only
         return [b for b in mine + [b for b in s.mode_bookies if b not in have] if b != skip and cur_of(b) == cur_of(skip)]
@@ -480,7 +482,11 @@ async def _home(uid: int, s: UserSettings, trader=None) -> tuple[str, InlineKeyb
 @router.message(F.text == kb.BTN_TRACK)
 async def show_home(m: Message, store: Storage, trader=None) -> None:
     awaiting.pop(m.from_user.id, None)
-    text, markup = await _home(m.from_user.id, store.get(m.from_user.id), trader)
+    s = store.get(m.from_user.id)
+    if s.mode != "crypto":
+        await m.answer(ONLY_CRYPTO)
+        return
+    text, markup = await _home(m.from_user.id, s, trader)
     await m.answer(text, reply_markup=markup)
 
 
@@ -610,6 +616,9 @@ async def _show_draft(bot: Bot, m: Message, uid: int, d: Draft) -> None:
 async def cb_played(c: CallbackQuery, store: Storage) -> None:
     _, token, budget = c.data.split(":")
     s = store.get(c.from_user.id)
+    if s.mode != "crypto":
+        await c.answer(ONLY_CRYPTO, show_alert=True)
+        return
     shown = kb.SHOWN.get(int(token))
     arb, key = (shown[1], shown[0]) if shown else (None, "")
     if arb is None:
@@ -634,6 +643,9 @@ async def cb(c: CallbackQuery, store: Storage, trader=None) -> None:
     s = store.get(uid)
     parts = c.data.split(":")
     action = parts[1]
+    if s.mode != "crypto":
+        await c.answer(ONLY_CRYPTO, show_alert=True)
+        return
 
     if action in ("home", "new"):
         awaiting.pop(uid, None)

@@ -45,7 +45,7 @@ async def main() -> None:
     dp.include_routers(auto.router, tracker.router, router, denied)
     await bot.set_my_commands([
         BotCommand(command="arbitraze", description="Lista svih arbitraža (osvežava se sama)"),
-        BotCommand(command="tiketi", description="📒 Tiketi i balans – prati šta igraš (sve kladionice)"),
+        BotCommand(command="tiketi", description="📒 Tiketi i balans – prati šta igraš (kripto)"),
         BotCommand(command="bot", description="Automatsko klađenje SX Bet + Polymarket (podešavanje)"),
         BotCommand(command="bottest", description="Test na papiru (rok, min %, max ulog)"),
         BotCommand(command="start", description="Glavni meni"),

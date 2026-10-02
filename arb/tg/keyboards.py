@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from arb import secrets
 from arb.arbitrage import Arb
 from arb.tg.formatting import money, outcome_text
-from arb.tg.storage import UserSettings
+from arb.tg.storage import BOOKIE_REGION, UserSettings
 
 BTN_LIST = "📋 Lista arbitraža"
 BTN_ARBS = "🔍 Arbitraže"
@@ -26,9 +26,8 @@ def main_menu(s: UserSettings) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
         [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
     ]
-    rows.append([KeyboardButton(text=BTN_TRACK)])  # 📒 tickets + money the user plays by hand (/tiketi)
-    if s.mode == "crypto":  # real automatic betting SX Bet + Polymarket (/bot)
-        rows[-1].append(KeyboardButton(text=BTN_AUTO))
+    if s.mode == "crypto":  # 📒 tickets + money played by hand (/tiketi), real betting SX Bet + Polymarket (/bot)
+        rows.append([KeyboardButton(text=BTN_TRACK), KeyboardButton(text=BTN_AUTO)])
     return ReplyKeyboardMarkup(
         keyboard=rows,
         resize_keyboard=True,
@@ -177,10 +176,11 @@ def arb_kb(arb: Arb, key: str, budget: float) -> InlineKeyboardMarkup:
         b.button(text=f"🔗 {leg.bookie} ({outs})", url=e.url)
     b.button(text="💰 Promeni ulog", callback_data=f"st:{key}:{budget}")
     b.button(text="🔍 Proveri kvote sad", callback_data=f"rf:{key}:{budget}")
-    # 📒 the user played it by hand: the bot keeps the ticket and the money (arb.tg.tracker)
-    b.button(text="✍️ Odigrao sam – prati tiket", callback_data=f"tk:{remember_shown(key, arb)}:{budget}")
+    crypto = all(BOOKIE_REGION.get(l.bookie) == "crypto" for l in arb.legs)
+    if crypto:  # 📒 the user played it by hand: the bot keeps the ticket and the money (arb.tg.tracker)
+        b.button(text="✍️ Odigrao sam – prati tiket", callback_data=f"tk:{remember_shown(key, arb)}:{budget}")
     b.button(text="❌ Sakrij", callback_data="del")
-    b.adjust(*([1] * len(seen)), 2, 1, 1)
+    b.adjust(*([1] * len(seen)), 2, *([1] if crypto else []), 1)
     return b.as_markup()
 
 

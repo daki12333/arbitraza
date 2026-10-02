@@ -118,15 +118,15 @@ def test_parse_money_and_odd():
 
 
 def test_parse_manual():
-    d, err = tr.parse_manual("Real – Barcelona 20:45\nMozzart 1 2.10 5000\nmeridian više 2.5 1,95 5.200")
+    d, err = tr.parse_manual("Real – Barcelona 20:45\n1xBit 1 2.10 50\npolymarket više 2.5 1,95 52,5")
     assert d is not None, err
-    assert d.name == "Real – Barcelona" and d.currency == "din" and len(d.legs) == 2
-    assert d.legs[1] == {"bookie": "Meridian", "outcome": "više 2.5", "label": "više 2.5", "odd": 1.95, "stake": 5200}
+    assert d.name == "Real – Barcelona" and d.currency == "$" and len(d.legs) == 2
+    assert d.legs[1] == {"bookie": "Polymarket", "outcome": "više 2.5", "label": "više 2.5", "odd": 1.95, "stake": 52.5}
     assert datetime.fromtimestamp(d.start, tr.TZ).strftime("%H:%M") == "20:45"
     _, err = tr.parse_manual("X\nNepoznata 1 2.0 100")
     assert "kladionicu" in err
     _, err = tr.parse_manual("X\nMozzart 1 2.0 100\n1xBit 2 2.1 10")
-    assert "dinare" in err  # din + $ in one ticket
+    assert "kripto" in err  # 📒 is for crypto bookies only
     name, start = tr.parse_start("A – B 03.10. 18:30")
     assert name == "A – B" and datetime.fromtimestamp(start, tr.TZ).strftime("%d.%m %H:%M") == "03.10 18:30"
 
@@ -157,8 +157,8 @@ def _cb(data):
 
 
 class Store:
-    def __init__(self):
-        self.s = UserSettings()
+    def __init__(self, mode="crypto"):
+        self.s = UserSettings(mode=mode, budget=100)
 
     def get(self, uid):
         return self.s
@@ -173,7 +173,7 @@ def _arb():
     def ev(bookie, odds):
         return Event(bookie=bookie, event_id=f"{bookie}-1", sport="tennis", home="Alpha", away="Beta",
                      start=start, group="g1", markets={"12": odds})
-    arbs = find_arbs([[ev("Mozzart", {"1": 2.15, "2": 1.6}), ev("Meridian", {"1": 1.7, "2": 2.1})]])
+    arbs = find_arbs([[ev("1xBit", {"1": 2.15, "2": 1.6}), ev("Polymarket", {"1": 1.7, "2": 2.1})]])
     assert arbs
     return arbs[0]
 
@@ -192,61 +192,61 @@ def test_flow_played_edit_save_remind_win():
 
     async def run():
         # ➕ uplata on both
-        for name, amount in (("Mozzart", "20.000"), ("Meridian", "20000")):
+        for name, amount in (("1xBit", "200"), ("Polymarket", "200,5")):
             awaiting[UID] = f"tr:dep:{name}"
             await tr.typed(_msg(amount), bot, store)
-        assert tr.book.balances(UID) == {"Mozzart": 20_000, "Meridian": 20_000}
+        assert tr.book.balances(UID) == {"1xBit": 200, "Polymarket": 200.5}
 
         # ✍️ Odigrao sam under the arb message
         arb = _arb()
-        markup = kb.arb_kb(arb, "g1:12", 10_000)
+        markup = kb.arb_kb(arb, "g1:12", 100)
         data = next(b.callback_data for row in markup.inline_keyboard for b in row
                     if (b.callback_data or "").startswith("tk:"))
         assert len(data.encode()) <= 64
         c = _cb(data)
         await tr.cb_played(c, store)
         d = tr.drafts[UID]
-        assert {l["bookie"] for l in d.legs} == {"Mozzart", "Meridian"} and d.planned > 0
+        assert {l["bookie"] for l in d.legs} == {"1xBit", "Polymarket"} and d.planned > 0
         assert "Novi tiket" in _texts(c.message.answer)
 
-        # the Mozzart leg went in at another odd: ✏️ then "5000 2.10"
-        i = next(i for i, l in enumerate(d.legs) if l["bookie"] == "Mozzart")
+        # the 1xBit leg went in at another odd: ✏️ then "50 2.10"
+        i = next(i for i, l in enumerate(d.legs) if l["bookie"] == "1xBit")
         await tr.cb(_cb(f"tr:dleg:{i}"), store)
         assert awaiting[UID] == f"tr:dleg:{i}"
-        await tr.typed(_msg("5000 2.10"), bot, store)
-        assert d.legs[i]["stake"] == 5000 and d.legs[i]["odd"] == 2.10
+        await tr.typed(_msg("50 2.10"), bot, store)
+        assert d.legs[i]["stake"] == 50 and d.legs[i]["odd"] == 2.10
         bot.edit_message_text.assert_awaited()
 
         # ✅ Sačuvaj
         await tr.cb(_cb("tr:dsave"), store)
         assert UID not in tr.drafts
         (t,) = tr.book.tickets(UID)
-        other = sum(l["stake"] for l in tr.book.legs(t["id"]) if l["bookie"] == "Meridian")
-        assert tr.book.balances(UID) == {"Mozzart": 15_000, "Meridian": 20_000 - other}
+        other = sum(l["stake"] for l in tr.book.legs(t["id"]) if l["bookie"] == "Polymarket")
+        assert tr.book.balances(UID) == {"1xBit": 150, "Polymarket": 200.5 - other}
 
         # the match started 4 h ago: ⏰ asks once
         assert await tr.remind(bot) == 1 and await tr.remind(bot) == 0
         assert "ko je prošao" in _texts(bot.send_message).lower()
 
-        # ✅ Prošao: Mozzart
-        leg = next(l for l in tr.book.legs(t["id"]) if l["bookie"] == "Mozzart")
+        # ✅ Prošao: 1xBit
+        leg = next(l for l in tr.book.legs(t["id"]) if l["bookie"] == "1xBit")
         c = _cb(f"tr:w:{t['id']}:{leg['id']}")
         await tr.cb(c, store)
         assert tr.book.ticket(t["id"])["status"] == track.SETTLED
-        assert tr.book.balances(UID)["Mozzart"] == 15_000 + 5000 * 2.10
+        assert abs(tr.book.balances(UID)["1xBit"] - (150 + 50 * 2.10)) < 1e-9
         assert "Završen" in _texts(c.message.edit_text)
 
         # 📒 home, 📊 stats, 🧾 history, 🔁 prebaci render
         text = tr.home_text(UID, store.s)
-        assert "Mozzart" in text and "Poslednjih 30 dana" in text
+        assert "1xBit" in text and "Poslednjih 30 dana" in text
         assert "Promet" in tr.stats_text(UID, 30)
         assert "dobitak" in tr.history_text(UID)
-        awaiting[UID] = "tr:mv:Mozzart:Meridian"
-        await tr.typed(_msg("1000 990"), bot, store)
-        assert tr.book.balances(UID)["Mozzart"] == 15_000 + 5000 * 2.10 - 1000
+        awaiting[UID] = "tr:mv:1xBit:Polymarket"
+        await tr.typed(_msg("10 9.5"), bot, store)
+        assert abs(tr.book.balances(UID)["1xBit"] - (150 + 50 * 2.10 - 10)) < 1e-9
 
         # a menu button while a number is awaited: the question is dropped, the button works
-        awaiting[UID] = "tr:dep:Mozzart"
+        awaiting[UID] = "tr:dep:1xBit"
         assert not tr._awaiting_tr(_msg(kb.BTN_LIST)) and UID not in awaiting
 
     asyncio.run(run())
@@ -273,6 +273,34 @@ def test_manual_ticket_flow():
         await tr.cb(_cb(f"tr:close:{t['id']}"), store)
         assert tr.book.ticket(t["id"])["profit"] == -10
         assert tr.book.balances(UID) == {"Polymarket": 0, "Stake": -10}
+
+    asyncio.run(run())
+
+
+def test_serbian_mode_unchanged():
+    """🇷🇸 mode stays as it was: no 📒 button, no ✍️ under arbs, /tiketi only says it's for crypto."""
+    rs = Store(mode="rs").s
+    menu = [b.text for row in kb.main_menu(rs).keyboard for b in row]
+    assert kb.BTN_TRACK not in menu and kb.BTN_AUTO not in menu
+    assert kb.BTN_TRACK in [b.text for row in kb.main_menu(Store().s).keyboard for b in row]
+
+    def ev(bookie, odds):
+        return Event(bookie=bookie, event_id=f"{bookie}-1", sport="tennis", home="Alpha", away="Beta",
+                     start=datetime.now(timezone.utc) + timedelta(hours=2), group="g1", markets={"12": odds})
+    (a,) = find_arbs([[ev("Mozzart", {"1": 2.15, "2": 1.6}), ev("Meridian", {"1": 1.7, "2": 2.1})]])
+    datas = [b.callback_data or "" for row in kb.arb_kb(a, "g1:12", 10_000).inline_keyboard for b in row]
+    assert not any(d.startswith("tk:") for d in datas)
+    assert any((b.callback_data or "").startswith("tk:") for row in kb.arb_kb(_arb(), "g1:12", 100).inline_keyboard
+               for b in row)
+
+    async def run():
+        store = Store(mode="rs")
+        m = _msg("/tiketi")
+        await tr.show_home(m, store)
+        assert "samo u 🪙 kripto" in _texts(m.answer)
+        c = _cb("tr:home")
+        await tr.cb(c, store)
+        c.message.edit_text.assert_not_awaited()
 
     asyncio.run(run())
 
