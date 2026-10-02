@@ -158,9 +158,6 @@ class Event:
     # exchanges (Polymarket): order book per (market, outcome) as [(odd after fee, $ on offer at it), ...],
     # best first - a bigger stake also eats into the worse prices
     depth: dict[tuple[str, str], list[tuple[float, float]]] = field(default_factory=dict)
-    # what the bookie's own API needs to bet this outcome, per (market, outcome) - for automatic
-    # betting (arb.live): Polymarket {"token", "condition", "rate", ...}, 1xBit {"GameId", "Type", "Param"}
-    bet_ref: dict[tuple[str, str], dict] = field(default_factory=dict)
     # the bookie writes the teams the other way round than the group (set when the matcher turns it):
     # our "1" is "2" on its site
     reversed: bool = False

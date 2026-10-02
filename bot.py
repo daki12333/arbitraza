@@ -12,9 +12,6 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from arb.config import ALLOWED_USERS, DATA_DIR, SCAN_INTERVAL, TELEGRAM_TOKEN
-from arb.live.engine import AutoTrader
-from arb.tg import auto
-from arb.tg.formatting import TZ
 from arb.tg.handlers import Notifier, allowed, denied, router
 from arb.tg.service import ArbService
 from arb.tg.storage import Storage
@@ -32,21 +29,15 @@ async def main() -> None:
     bot = Bot(TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
     service = ArbService(SCAN_INTERVAL)
     store = Storage()
-    notifier = Notifier(bot, service, store)
-    trader_ref: list = []
-    trader = AutoTrader(service, store, auto.make_sender(bot, trader_ref), tz=TZ)
-    trader_ref.append(trader)
-    notifier.trader = trader  # 🤖 real bets (1xBit + Polymarket) after every scan
-    service.on_scan = notifier
+    service.on_scan = Notifier(bot, service, store)
     # scan only the bookies someone is using (Serbian / crypto)
     service.regions = lambda: {s.mode for uid, s in store.users.items() if allowed(uid)}
 
-    dp = Dispatcher(service=service, store=store, trader=trader)
-    dp.include_routers(auto.router, router, denied)  # 🤖 first: it takes the typed keys / amounts it asked for
+    dp = Dispatcher(service=service, store=store)
+    dp.include_routers(router, denied)
     await bot.set_my_commands([
         BotCommand(command="arbitraze", description="Lista svih arbitraža (osvežava se sama)"),
-        BotCommand(command="bot", description="🤖 Prave uplate 1xBit + Polymarket: nalozi, balans, tiketi, 🛑 Stop"),
-        BotCommand(command="bottest", description="🧪 Test na papiru (rok, min %, max ulog)"),
+        BotCommand(command="bot", description="Bot: test na papiru (rok, min %, max ulog)"),
         BotCommand(command="start", description="Glavni meni"),
     ])
 
@@ -57,7 +48,6 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         scan_task.cancel()
-        await trader.close()
         await service.close()
         await bot.session.close()
 

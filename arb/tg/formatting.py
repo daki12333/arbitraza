@@ -426,7 +426,7 @@ def paper_report(rows: list[dict], since_label: str, currency: str = "$") -> str
     """Summary of the stored paper tests (arb.paper.load)."""
     if not rows:
         return (f"📊 <b>Test na papiru – {since_label}</b>\n\nJoš nema testova. Bot testira arbitraže koje prolaze "
-                "tvoja pravila iz /bottest (rok početka meča, najmanji % i najveći ulog).")
+                "tvoja pravila iz /bot (rok početka meča, najmanji % i najveći ulog).")
     by: dict[str, list[dict]] = {}
     for r in rows:
         by.setdefault(r["status"], []).append(r)

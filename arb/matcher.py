@@ -256,7 +256,6 @@ def _swap_sides(ev: Event) -> None:
     ev.limits = _flip_keys(ev.limits)  # stake limits and site wording follow their outcome
     ev.how = _flip_keys(ev.how)
     ev.depth = _flip_keys(ev.depth)
-    ev.bet_ref = _flip_keys(ev.bet_ref)  # the site's own ids follow their outcome too
 
 
 def _flip_keys(d: dict) -> dict:

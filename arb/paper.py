@@ -25,7 +25,7 @@ from arb.tg.service import arb_key, group_key
 
 DB_FILE = DATA_DIR / "paper.db"
 EXEC_DELAY = 5.0  # s - from the first leg to the last when the money already sits on both bookies
-# (/bottest can set it longer, e.g. 150 s when the money has to be sent over Solana first)
+# (/bot can set it longer, e.g. 150 s when the money has to be sent over Solana first)
 EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills instantly, "all or nothing")
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
@@ -75,9 +75,9 @@ class PaperResult:
     hedge_stake: float = 0.0
     hedge_odd: float = 0.0
     cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
-    free: float | None = None  # /bottest balance left free after this bet (None = not tracked)
-    settles: float | None = None  # /bottest: when this bet's match is over and its profit goes onto the balance
-    wallets: dict[str, float] | None = None  # /bottest: money free on each bookie after this bet
+    free: float | None = None  # /bot balance left free after this bet (None = not tracked)
+    settles: float | None = None  # /bot: when this bet's match is over and its profit goes onto the balance
+    wallets: dict[str, float] | None = None  # /bot: money free on each bookie after this bet
     at: float = field(default_factory=time.time)
 
 
@@ -111,11 +111,11 @@ def by_bookie(rows) -> dict[str, float]:
 
 
 def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
-              caps: dict[str, float] | None = None, min_stake: float = MIN_STAKE) -> float | None:
+              caps: dict[str, float] | None = None) -> float | None:
     """The biggest total up to `max_stake` that this arb takes: the full amount if every leg
     fits, otherwise less (a bookie limit / thin Polymarket book). With `caps` (money on each
     bookie) no bookie's legs may need more than it has: if the split is 70/30 and each side
-    has 25 $, the total is ~35 $, not 50 $. None = not even `min_stake`."""
+    has 25 $, the total is ~35 $, not 50 $. None = not even MIN_STAKE."""
     stake = max_stake
     if caps is not None:  # start where the tightest bookie runs out
         need: dict[str, float] = {}
@@ -123,7 +123,7 @@ def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
             need[leg.bookie] = need.get(leg.bookie, 0.0) + st
         ratio = min((caps.get(b, 0.0) / st for b, st in need.items() if st > 0), default=1.0)
         stake = math.floor(max_stake * min(ratio, 1.0) * 2) / 2
-    while stake >= min_stake - 1e-9:
+    while stake >= MIN_STAKE - 1e-9:
         rows = arb.plan(stake, currency)
         if rows and (caps is None or all(st <= caps.get(b, 0.0) + 1e-9 for b, st in by_bookie(rows).items())):
             over = sum(st for _, st, _ in rows) - max_stake
@@ -131,8 +131,7 @@ def fit_stake(arb: Arb, max_stake: float, currency: str = "$",
                 return stake
             stake -= math.ceil(over * 2) / 2  # rounded stakes went above the max: just that much lower
             continue
-        # 100 -> 90 -> 81 ... on half-dollars (small stakes on dimes, and always at least one step down)
-        stake = min(round(stake * 0.9 * 2) / 2 if stake >= 20 else round(stake * 0.9, 1), round(stake - 0.1, 1))
+        stake = round(stake * 0.9 * 2) / 2  # 100 -> 90 -> 81 ... on half-dollars
     return None
 
 
@@ -254,7 +253,7 @@ def settles_at(start_iso: str) -> float | None:
 
 @dataclass
 class Ledger:
-    """The /bottest balance: the starting money plus the profit of tested bets whose match
+    """The /bot balance: the starting money plus the profit of tested bets whose match
     is over. Bets on matches still to be played tie up their stake ("in play") and
     their profit waits - an arb pays out after the match, not when it is found.
 

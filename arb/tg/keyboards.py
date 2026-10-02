@@ -6,7 +6,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from arb import secrets
 from arb.arbitrage import Arb
 from arb.tg.formatting import money, outcome_text
-from arb.tg.service import cb_key
 from arb.tg.storage import UserSettings
 
 BTN_LIST = "📋 Lista arbitraža"
@@ -14,22 +13,18 @@ BTN_ARBS = "🔍 Arbitraže"
 BTN_BUDGET = "💰 Ulog"
 BTN_BOOKIES = "🏦 Kladionice"
 BTN_STATUS = "📊 Status"
-BTN_AUTO = "🤖 Auto"
 
 BUDGETS = {"din": [10_000, 20_000, 50_000, 100_000, 200_000, 500_000],
            "$": [25, 50, 100, 250, 500, 1_000]}
 
 
 def main_menu(s: UserSettings) -> ReplyKeyboardMarkup:
-    rows = [
-        [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
-        [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
-        [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
-    ]
-    if s.mode == "crypto":  # real automatic betting: accounts, balances, tickets
-        rows.append([KeyboardButton(text=BTN_AUTO)])
     return ReplyKeyboardMarkup(
-        keyboard=rows,
+        keyboard=[
+            [KeyboardButton(text=BTN_LIST), KeyboardButton(text=BTN_ARBS)],
+            [KeyboardButton(text=f"{BTN_BUDGET}: {money(s.budget, s.currency)} {s.currency}"), KeyboardButton(text=BTN_STATUS)],
+            [KeyboardButton(text=BTN_BOOKIES), KeyboardButton(text=BTN_NOTIFY), KeyboardButton(text=BTN_MIDDLES)],
+        ],
         resize_keyboard=True,
         is_persistent=True,
         input_field_placeholder="Upiši koliko ulažeš, npr. " + ("100" if s.currency == "$" else "50000"),
@@ -44,7 +39,7 @@ def list_kb(keys: list[str], first: int, live: bool, page: int, pages: int,
     """Numbered buttons for this page (open one arb in detail), paging, refresh / live toggle."""
     b = InlineKeyboardBuilder()
     for i, key in enumerate(keys, first + 1):
-        b.button(text=str(i), callback_data=f"ad:{cb_key(key)}")
+        b.button(text=str(i), callback_data=f"ad:{key}")
     rows = [5] * (len(keys) // 5) + ([len(keys) % 5] if len(keys) % 5 else [])
     if pages > 1:
         b.button(text="◀️", callback_data=f"ls:page:{(page - 1) % pages}")
@@ -95,7 +90,7 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-# /bottest: the rules of the paper test (arb.paper)
+# /bot: the rules of the paper test (arb.paper)
 BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
 BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
 BOT_STAKES = [10, 25, 50, 100, 250]
@@ -142,12 +137,12 @@ def wallets_kb(s: UserSettings) -> InlineKeyboardMarkup:
     for name in names:
         have = s.bot_wallets.get(name)
         b.button(text=f"✅ {name}: {money(have, '$')} $" if have else f"⬜ {name}", callback_data=f"bw:{name}")
-    b.button(text="⬅️ Nazad na /bottest", callback_data="bt:back")
+    b.button(text="⬅️ Nazad na /bot", callback_data="bt:back")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), 1)
     return b.as_markup()
 
 
-# Arb callbacks: "<action>:<cb_key(arb key)>:<budget>"
+# Arb callbacks: "<action>:<group key>:<market>:<budget>"
 def arb_kb(arb: Arb, key: str, budget: float) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     # one "open the match" button per bookie involved
@@ -159,8 +154,8 @@ def arb_kb(arb: Arb, key: str, budget: float) -> InlineKeyboardMarkup:
         seen.append(leg.bookie)
         outs = ", ".join(outcome_text(arb, l.outcome, short=True) for l in arb.legs if l.bookie == leg.bookie)
         b.button(text=f"🔗 {leg.bookie} ({outs})", url=e.url)
-    b.button(text="💰 Promeni ulog", callback_data=f"st:{cb_key(key)}:{budget}")
-    b.button(text="🔍 Proveri kvote sad", callback_data=f"rf:{cb_key(key)}:{budget}")
+    b.button(text="💰 Promeni ulog", callback_data=f"st:{key}:{budget}")
+    b.button(text="🔍 Proveri kvote sad", callback_data=f"rf:{key}:{budget}")
     b.button(text="❌ Sakrij", callback_data="del")
     b.adjust(*([1] * len(seen)), 2, 1)
     return b.as_markup()
@@ -170,9 +165,9 @@ def arb_budget_kb(key: str, budget: float, currency: str = "din") -> InlineKeybo
     b = InlineKeyboardBuilder()
     for a in BUDGETS[currency]:
         mark = "✅ " if a == budget else ""
-        b.button(text=f"{mark}{money(a, currency)}", callback_data=f"rf:{cb_key(key)}:{a}")
-    b.button(text="✏️ Upiši svoj iznos", callback_data=f"cu:{cb_key(key)}:{budget}")
-    b.button(text="⬅️ Nazad", callback_data=f"rf:{cb_key(key)}:{budget}")
+        b.button(text=f"{mark}{money(a, currency)}", callback_data=f"rf:{key}:{a}")
+    b.button(text="✏️ Upiši svoj iznos", callback_data=f"cu:{key}:{budget}")
+    b.button(text="⬅️ Nazad", callback_data=f"rf:{key}:{budget}")
     b.adjust(3, 3, 1, 1)
     return b.as_markup()
 
@@ -197,8 +192,7 @@ def bookies_kb(s: UserSettings) -> InlineKeyboardMarkup:
     if s.mode == "crypto":
         has_key = bool(secrets.get("sxbet_api_key"))
         b.button(text="🔑 SX Bet ključ ✅ (promeni)" if has_key else "🔑 Unesi SX Bet API ključ", callback_data="set:sxkey:")
-        b.button(text="🤖 Nalozi, balans i automatsko klađenje", callback_data="au:back")
-        extra = 3
+        extra = 2
     switch = "🇷🇸 Prebaci na srpske kladionice" if s.mode == "crypto" else "🪙 Prebaci na kripto"
     b.button(text=switch, callback_data="set:mode:")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), *([1] * extra))

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import time
 from typing import Awaitable, Callable
@@ -27,28 +26,6 @@ def group_key(group: list[Event]) -> str:
 
 def arb_key(arb: Arb) -> str:
     return f"{group_key(arb.events)}:{arb.market}"
-
-
-# Telegram takes at most 64 bytes of callback data, and some group keys (a bookie's own
-# long event id) plus the market don't fit: buttons carry a short token instead.
-_cb_keys: dict[str, str] = {}
-CB_KEYS_MAX = 50_000
-
-
-def cb_key(key: str) -> str:
-    """The arb key as it goes into callback data: 12 hex chars, no ':'."""
-    token = hashlib.sha1(key.encode()).hexdigest()[:12]
-    if token not in _cb_keys:
-        if len(_cb_keys) >= CB_KEYS_MAX:
-            del _cb_keys[next(iter(_cb_keys))]  # forget the oldest
-        _cb_keys[token] = key
-    return token
-
-
-def key_from_cb(token: str) -> str:
-    """Back from cb_key(). Buttons from before a restart (or the old "group:market" form)
-    come back as they are - lookup() then just doesn't find the arb."""
-    return _cb_keys.get(token, token)
 
 
 def _legs_sig(arb: Arb) -> tuple:
