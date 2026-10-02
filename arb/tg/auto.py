@@ -1,6 +1,6 @@
 """🤖 Auto: real automatic betting on 1xBit + Polymarket (arb.live) - the accounts (log in,
-connect), balances, tickets, rules, 🛑 Stop. Opened with the 🤖 Auto button (crypto mode),
-/auto, or 🏦 Kladionice → 🤖 Nalozi."""
+connect), balances, tickets, rules, 🛑 Stop. Opened with /bot (or /auto), the 🤖 Auto button
+(crypto mode), or 🏦 Kladionice → 🤖 Nalozi. The paper test is on /bottest."""
 from __future__ import annotations
 
 import asyncio
@@ -85,7 +85,8 @@ async def auto_text(uid: int, s: UserSettings, trader: AutoTrader, service=None)
         lines.append("\n⚠️ Radi samo u 🪙 kripto režimu (🏦 Kladionice → 🪙 Prebaci na kripto).")
     lines += ["", "Redosled: prvo 1xBit (može da odbije tiket – tada se ništa ne gubi), pa Polymarket "
                   "„sve ili ništa“ po ceni na kojoj je arbitraža najgore na nuli. Pre svake uplate: provera kvota, "
-                  "limita, balansa i da li Polymarket dozvoljava tvoju zemlju."]
+                  "limita, balansa i da li Polymarket dozvoljava tvoju zemlju.",
+              "🧪 Test na papiru (ništa se ne uplaćuje) je na /bottest."]
     return "\n".join(lines)
 
 
@@ -206,7 +207,7 @@ def make_sender(bot: Bot, trader_ref: list):
 
 # ---------------------------------------------------------------- menu
 
-@router.message(Command("auto"))
+@router.message(Command("bot", "auto"))
 @router.message(F.text == kb.BTN_AUTO)
 async def show_auto(m: Message, service, store: Storage, trader: AutoTrader) -> None:
     awaiting.pop(m.from_user.id, None)

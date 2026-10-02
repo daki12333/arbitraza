@@ -446,7 +446,7 @@ async def test_ui():
     assert any(b.text == kb.BTN_AUTO for row in kb.main_menu(s).keyboard for b in row)
     assert any(b.callback_data == "au:back" for row in kb.bookies_kb(s).inline_keyboard for b in row)
 
-    m = fake_message("/auto")
+    m = fake_message("/bot")
     await ui.show_auto(m, service, store, t)
     out = last(m.answer)
     assert "1xBit + Polymarket" in out and "isključeno" in out and "Trenutno prolazi: <b>1</b>" in out, out

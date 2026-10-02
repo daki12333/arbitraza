@@ -45,8 +45,8 @@ async def main() -> None:
     dp.include_routers(auto.router, router, denied)  # 🤖 first: it takes the typed keys / amounts it asked for
     await bot.set_my_commands([
         BotCommand(command="arbitraze", description="Lista svih arbitraža (osvežava se sama)"),
-        BotCommand(command="bot", description="Bot: test na papiru (rok, min %, max ulog)"),
-        BotCommand(command="auto", description="Prave uplate 1xBit + Polymarket: nalozi, balans, tiketi, 🛑 Stop"),
+        BotCommand(command="bot", description="🤖 Prave uplate 1xBit + Polymarket: nalozi, balans, tiketi, 🛑 Stop"),
+        BotCommand(command="bottest", description="🧪 Test na papiru (rok, min %, max ulog)"),
         BotCommand(command="start", description="Glavni meni"),
     ])
 

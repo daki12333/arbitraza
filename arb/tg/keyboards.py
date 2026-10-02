@@ -6,6 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from arb import secrets
 from arb.arbitrage import Arb
 from arb.tg.formatting import money, outcome_text
+from arb.tg.service import cb_key
 from arb.tg.storage import UserSettings
 
 BTN_LIST = "📋 Lista arbitraža"
@@ -43,7 +44,7 @@ def list_kb(keys: list[str], first: int, live: bool, page: int, pages: int,
     """Numbered buttons for this page (open one arb in detail), paging, refresh / live toggle."""
     b = InlineKeyboardBuilder()
     for i, key in enumerate(keys, first + 1):
-        b.button(text=str(i), callback_data=f"ad:{key}")
+        b.button(text=str(i), callback_data=f"ad:{cb_key(key)}")
     rows = [5] * (len(keys) // 5) + ([len(keys) % 5] if len(keys) % 5 else [])
     if pages > 1:
         b.button(text="◀️", callback_data=f"ls:page:{(page - 1) % pages}")
@@ -94,7 +95,7 @@ def notify_kb(s: UserSettings) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-# /bot: the rules of the paper test (arb.paper)
+# /bottest: the rules of the paper test (arb.paper)
 BOT_HOURS = [1, 3, 6, 12, 24, 0]  # 0 = any kickoff time
 BOT_MINS = [0.5, 1.0, 1.5, 2.0, 3.0]
 BOT_STAKES = [10, 25, 50, 100, 250]
@@ -141,12 +142,12 @@ def wallets_kb(s: UserSettings) -> InlineKeyboardMarkup:
     for name in names:
         have = s.bot_wallets.get(name)
         b.button(text=f"✅ {name}: {money(have, '$')} $" if have else f"⬜ {name}", callback_data=f"bw:{name}")
-    b.button(text="⬅️ Nazad na /bot", callback_data="bt:back")
+    b.button(text="⬅️ Nazad na /bottest", callback_data="bt:back")
     b.adjust(*([2] * (len(names) // 2)), *([1] if len(names) % 2 else []), 1)
     return b.as_markup()
 
 
-# Arb callbacks: "<action>:<group key>:<market>:<budget>"
+# Arb callbacks: "<action>:<cb_key(arb key)>:<budget>"
 def arb_kb(arb: Arb, key: str, budget: float) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     # one "open the match" button per bookie involved
@@ -158,8 +159,8 @@ def arb_kb(arb: Arb, key: str, budget: float) -> InlineKeyboardMarkup:
         seen.append(leg.bookie)
         outs = ", ".join(outcome_text(arb, l.outcome, short=True) for l in arb.legs if l.bookie == leg.bookie)
         b.button(text=f"🔗 {leg.bookie} ({outs})", url=e.url)
-    b.button(text="💰 Promeni ulog", callback_data=f"st:{key}:{budget}")
-    b.button(text="🔍 Proveri kvote sad", callback_data=f"rf:{key}:{budget}")
+    b.button(text="💰 Promeni ulog", callback_data=f"st:{cb_key(key)}:{budget}")
+    b.button(text="🔍 Proveri kvote sad", callback_data=f"rf:{cb_key(key)}:{budget}")
     b.button(text="❌ Sakrij", callback_data="del")
     b.adjust(*([1] * len(seen)), 2, 1)
     return b.as_markup()
@@ -169,9 +170,9 @@ def arb_budget_kb(key: str, budget: float, currency: str = "din") -> InlineKeybo
     b = InlineKeyboardBuilder()
     for a in BUDGETS[currency]:
         mark = "✅ " if a == budget else ""
-        b.button(text=f"{mark}{money(a, currency)}", callback_data=f"rf:{key}:{a}")
-    b.button(text="✏️ Upiši svoj iznos", callback_data=f"cu:{key}:{budget}")
-    b.button(text="⬅️ Nazad", callback_data=f"rf:{key}:{budget}")
+        b.button(text=f"{mark}{money(a, currency)}", callback_data=f"rf:{cb_key(key)}:{a}")
+    b.button(text="✏️ Upiši svoj iznos", callback_data=f"cu:{cb_key(key)}:{budget}")
+    b.button(text="⬅️ Nazad", callback_data=f"rf:{cb_key(key)}:{budget}")
     b.adjust(3, 3, 1, 1)
     return b.as_markup()
 

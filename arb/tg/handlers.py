@@ -19,7 +19,7 @@ from arb.tg import keyboards as kb
 from arb.tg.formatting import (MIDDLES_PAGE, PAGE_SIZE, TZ, arb_text, list_text, middles_text, money, page_count,
                                 dur, paper_report, paper_text, signed, status_text)
 from arb.arbitrage import Arb
-from arb.tg.service import ArbService, _legs_sig, arb_key
+from arb.tg.service import ArbService, _legs_sig, arb_key, key_from_cb
 from arb.tg.storage import Storage, UserSettings
 
 log = logging.getLogger(__name__)
@@ -304,7 +304,7 @@ def notify_text(s: UserSettings) -> str:
         "📋 Lista arbitraža prikazuje sve koje prolaze za tvoj ulog, bez obzira na ovo."
     )
     if s.mode == "crypto":
-        text += "\n\n🧪 Test na papiru se podešava posebno: /bot"
+        text += "\n\n🧪 Test na papiru se podešava posebno: /bottest"
     return text
 
 
@@ -315,7 +315,7 @@ def paper_report_for(uid: int, s: UserSettings) -> str:
 
 
 def bot_view(s: UserSettings) -> UserSettings:
-    """The user's settings as the /bot test sees them: with money set per bookie, only
+    """The user's settings as the /bottest test sees them: with money set per bookie, only
     those bookies (so arbs are looked for among them, not just filtered)."""
     if not s.bot_wallets:
         return s
@@ -327,9 +327,9 @@ def bot_ledger(uid: int, s: UserSettings) -> paper.Ledger:
 
 
 def bot_stake_for(arb: Arb, s: UserSettings, caps: dict[str, float] | None = None) -> float | None:
-    """The total the /bot test would put into this arb: up to bot_stake, less if the
+    """The total the /bottest test would put into this arb: up to bot_stake, less if the
     bookies take less or (with `caps`, money per bookie) one side doesn't have enough.
-    None = the arb doesn't pass the /bot rules."""
+    None = the arb doesn't pass the /bottest rules."""
     if arb.suspicious:
         return None
     if s.bot_hours and arb.event.start > datetime.now(timezone.utc) + timedelta(hours=s.bot_hours):
@@ -345,7 +345,7 @@ def bot_stake_for(arb: Arb, s: UserSettings, caps: dict[str, float] | None = Non
 def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None = None) -> str:
     when = f"u narednih <b>{s.bot_hours} h</b>" if s.bot_hours else "<b>bilo kad</b>"
     lines = [
-        "🤖 <b>Bot – test na papiru</b>: " + ("✅ <b>uključen</b>" if s.paper else "⬜ <b>isključen</b>"), "",
+        "🧪 <b>/bottest – test na papiru</b>: " + ("✅ <b>uključen</b>" if s.paper else "⬜ <b>isključen</b>"), "",
         "Igra sve arbitraže koje:",
         f"⏰ počinju {when}",
         f"📈 imaju profit <b>{s.bot_min:g}%</b> ili više",
@@ -386,6 +386,7 @@ def bot_text(s: UserSettings, service: ArbService | None = None, uid: int | None
         f"„uplati“ prvu nogu, posle {dur(s.bot_delay)} ponovo proveri poslednju "
         "i javi ti da li bi prošlo i kolika bi bila zarada. Više testova radi istovremeno. "
         "Uveče stiže izveštaj.",
+        "💸 Prave uplate (1xBit + Polymarket) su na /bot.",
     ]
     if s.mode != "crypto":
         lines.append("\n⚠️ Test radi samo sa 🪙 kripto kladionicama – prebaci u 🏦 Kladionice → 🪙 Prebaci na kripto.")
@@ -401,11 +402,11 @@ def wallets_text(s: UserSettings) -> str:
         lines.append(f"Ukupno: <b>{money(sum(s.bot_wallets.values()), '$')} $</b>")
     else:
         lines.append("Još ništa nije upisano – test sad koristi jedan zajednički budžet za sve kladionice.")
-    lines += ["", "Kad promeniš iznose, klikni 🔄 Kreni ispočetka u /bot da balans krene od njih."]
+    lines += ["", "Kad promeniš iznose, klikni 🔄 Kreni ispočetka u /bottest da balans krene od njih."]
     return "\n".join(lines)
 
 
-# /bot 📊 Parovi: arb key -> (bookies of the arb, first seen) per user, the last 24 h
+# /bottest 📊 Parovi: arb key -> (bookies of the arb, first seen) per user, the last 24 h
 pair_log: dict[int, dict[str, tuple[tuple[str, ...], float]]] = {}
 PAIR_HOURS = 24
 
@@ -418,7 +419,7 @@ def pairs_text(uid: int) -> str:
     for pair, _ in seen.values():
         count[pair] = count.get(pair, 0) + 1
     hours = min(PAIR_HOURS, (time.time() - min(t for _, t in seen.values())) / 3600)
-    lines = [f"📊 <b>Parovi kladionica</b> – arbitraže koje prolaze tvoja pravila iz /bot, "
+    lines = [f"📊 <b>Parovi kladionica</b> – arbitraže koje prolaze tvoja pravila iz /bottest, "
              f"poslednjih {max(hours, 0.1):.1f} h".replace(".", ",") + f" ({len(seen)} ukupno):", ""]
     for i, (pair, n) in enumerate(sorted(count.items(), key=lambda x: -x[1])[:10], 1):
         lines.append(f"{i}. {' + '.join(pair)}: <b>{n}</b> ({n / len(seen) * 100:.0f}%)")
@@ -439,7 +440,7 @@ async def show_notify(m: Message, store: Storage) -> None:
     await m.answer(notify_text(s), reply_markup=kb.notify_kb(s))
 
 
-@router.message(Command("bot"))
+@router.message(Command("bottest"))
 async def show_bot(m: Message, service: ArbService, store: Storage) -> None:
     awaiting.pop(m.from_user.id, None)
     s = store.get(m.from_user.id)
@@ -643,8 +644,7 @@ async def cb_delete(c: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("ad:"))
 async def cb_arb_detail(c: CallbackQuery, bot: Bot, service: ArbService, store: Storage) -> None:
-    _, gkey, market = c.data.split(":")
-    key = f"{gkey}:{market}"
+    key = key_from_cb(c.data.split(":", 1)[1])
     s = store.get(c.from_user.id)
     await c.answer()
     # answer at once, then fill in the re-checked odds (slow sites: max ~10 s)
@@ -696,8 +696,8 @@ async def cb_list(c: CallbackQuery, bot: Bot, service: ArbService, store: Storag
 
 @router.callback_query(F.data.startswith("cu:"))
 async def cb_custom_arb(c: CallbackQuery, store: Storage) -> None:
-    _, gkey, market, _ = c.data.split(":")
-    awaiting[c.from_user.id] = (c.message.chat.id, c.message.message_id, f"{gkey}:{market}")
+    token, _, _ = c.data.split(":", 1)[1].rpartition(":")
+    awaiting[c.from_user.id] = (c.message.chat.id, c.message.message_id, key_from_cb(token))
     s = store.get(c.from_user.id)
     await c.message.answer(f"✏️ Upiši koliko ulažeš u ovu arbitražu (npr. <code>{example(s)}</code>):")
     await c.answer()
@@ -705,8 +705,9 @@ async def cb_custom_arb(c: CallbackQuery, store: Storage) -> None:
 
 @router.callback_query(F.data.startswith("rf:") | F.data.startswith("st:"))
 async def cb_arb(c: CallbackQuery, bot: Bot, service: ArbService, store: Storage) -> None:
-    action, gkey, market, budget = c.data.split(":")
-    key, budget = f"{gkey}:{market}", number(budget)
+    action, rest = c.data.split(":", 1)
+    token, _, budget = rest.rpartition(":")
+    key, budget = key_from_cb(token), number(budget)
     s = store.get(c.from_user.id)
 
     if action == "st":
@@ -874,7 +875,7 @@ class Notifier:
         self.paper_task: asyncio.Task | None = None
         self.paper_seen: dict[int, dict[str, tuple[float, tuple]]] = {}  # uid -> arb key -> (tested at, legs)
         self.paper_reported: dict[int, str] = {}  # uid -> date of the last evening report
-        self.paper_full: set[int] = set()  # users told their /bot budget is all in play
+        self.paper_full: set[int] = set()  # users told their /bottest budget is all in play
         # tests still waiting for their last leg: uid -> arb key -> $ reserved on each bookie
         self.paper_running: dict[int, dict[str, dict[str, float]]] = {}
         self.paper_moved: dict[int, tuple | None] = {}  # uid -> the last "⚖️ prebaci" suggestion sent
@@ -902,7 +903,7 @@ class Notifier:
                 log.exception("paper round %s failed", uid)
 
     def log_pairs(self) -> None:
-        """/bot 📊 Parovi: which bookies the arbs passing the /bot rules use (all the user's
+        """/bottest 📊 Parovi: which bookies the arbs passing the /bottest rules use (all the user's
         bookies, not only those with money - that's what helps pick where to put it)."""
         now = time.time()
         for uid, s in list(self.store.users.items()):
@@ -933,7 +934,7 @@ class Notifier:
         return led, caps, free
 
     async def _paper_user(self, uid: int, s: UserSettings) -> None:
-        """Start tests for the arbs that pass the /bot rules. Each one waits s.bot_delay
+        """Start tests for the arbs that pass the /bottest rules. Each one waits s.bot_delay
         for its last leg, so they run side by side; the stakes are reserved right away."""
         seen = self.paper_seen.setdefault(uid, {})
         running = self.paper_running.setdefault(uid, {})
@@ -941,7 +942,7 @@ class Notifier:
         now = time.time()
         todo = []
         for a in self.service.arbs_for(view):
-            if arb_key(a) in running or bot_stake_for(a, view) is None:  # /bot rules: kickoff, min %, max stake
+            if arb_key(a) in running or bot_stake_for(a, view) is None:  # /bottest rules: kickoff, min %, max stake
                 continue
             prev = seen.get(arb_key(a))
             if prev and prev[1] == _legs_sig(a) and now - prev[0] < paper.RETEST_AFTER:
@@ -957,7 +958,7 @@ class Notifier:
                     self.paper_full.add(uid)
                     await self.bot.send_message(
                         uid, "💼 Sav novac je u igri – test čeka da se mečevi završe i novac vrati. "
-                             "Stanje vidiš u /bot.")
+                             "Stanje vidiš u /bottest.")
                 break
             self.paper_full.discard(uid)
             stake = bot_stake_for(a, view, caps) if caps is not None else bot_stake_for(a, replace(
@@ -992,7 +993,7 @@ class Notifier:
         await self.bot.send_message(
             uid, f"⚖️ <b>Prebaci {money(move[2], '$')} $ sa {move[0]} na {move[1]}</b> – na {move[1]} je ostalo "
                  f"{money(max(led.cash.get(move[1], 0.0), 0), '$')} $, pa test propušta arbitraže. "
-                 "(Test ne prebacuje sam – kad prebaciš, upiši nove iznose u /bot → 💼.)")
+                 "(Test ne prebacuje sam – kad prebaciš, upiši nove iznose u /bottest → 💼.)")
 
     async def _paper_test(self, uid: int, s: UserSettings, view: UserSettings, a: Arb, stake: float,
                           caps: dict[str, float] | None) -> None:

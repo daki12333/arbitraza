@@ -25,7 +25,7 @@ from arb.tg.service import arb_key, group_key
 
 DB_FILE = DATA_DIR / "paper.db"
 EXEC_DELAY = 5.0  # s - from the first leg to the last when the money already sits on both bookies
-# (/bot can set it longer, e.g. 150 s when the money has to be sent over Solana first)
+# (/bottest can set it longer, e.g. 150 s when the money has to be sent over Solana first)
 EXCHANGES = ("Polymarket", "SX Bet")  # order books: always the last leg (fills instantly, "all or nothing")
 QUICK = ("1xBit",)  # sportsbooks that can re-check one game in a second: the last leg if there's no exchange
 RETEST_AFTER = 20 * 60  # s - the same arb (same odds) is tested again only after this long
@@ -75,9 +75,9 @@ class PaperResult:
     hedge_stake: float = 0.0
     hedge_odd: float = 0.0
     cap: float = 0.0  # the most the test was allowed to stake (total may be less: limits / thin book)
-    free: float | None = None  # /bot balance left free after this bet (None = not tracked)
-    settles: float | None = None  # /bot: when this bet's match is over and its profit goes onto the balance
-    wallets: dict[str, float] | None = None  # /bot: money free on each bookie after this bet
+    free: float | None = None  # /bottest balance left free after this bet (None = not tracked)
+    settles: float | None = None  # /bottest: when this bet's match is over and its profit goes onto the balance
+    wallets: dict[str, float] | None = None  # /bottest: money free on each bookie after this bet
     at: float = field(default_factory=time.time)
 
 
@@ -254,7 +254,7 @@ def settles_at(start_iso: str) -> float | None:
 
 @dataclass
 class Ledger:
-    """The /bot balance: the starting money plus the profit of tested bets whose match
+    """The /bottest balance: the starting money plus the profit of tested bets whose match
     is over. Bets on matches still to be played tie up their stake ("in play") and
     their profit waits - an arb pays out after the match, not when it is found.
 

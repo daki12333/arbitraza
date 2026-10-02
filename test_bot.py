@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from arb.tg import handlers as h
-from arb.tg.service import ArbService, arb_key
+from arb.tg.service import ArbService, arb_key, cb_key
 from arb.tg.storage import Storage, UserSettings
 
 UID = 1
@@ -97,7 +97,7 @@ async def check_mode(service: ArbService, store: Storage, mode: str) -> None:
     # click the numbers of the top 3 arbs
     for arb in arbs[:3]:
         key = arb_key(arb)
-        c = fake_callback(f"ad:{key}")
+        c = fake_callback(f"ad:{cb_key(key)}")
         bot = MagicMock()
         bot.edit_message_text = AsyncMock()
         await timed(f"klik {arb.event.name[:40]}", h.cb_arb_detail(c, bot, service, store), MAX_CLICK_SECONDS)
@@ -116,7 +116,7 @@ async def check_mode(service: ArbService, store: Storage, mode: str) -> None:
 
     # 🔄 Osveži + custom stake on the first arb
     key = arb_key(arbs[0])
-    c = fake_callback(f"rf:{key}:{s.budget}")
+    c = fake_callback(f"rf:{cb_key(key)}:{s.budget}")
     c.message.edit_text = AsyncMock()
     bot = MagicMock()
     bot.edit_message_text = AsyncMock()
